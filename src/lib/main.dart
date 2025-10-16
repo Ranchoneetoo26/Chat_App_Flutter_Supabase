@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:zapizapi/ui/widgets/custom_button.dart';
-import 'package:zapizapi/ui/widgets/custom_input.dart';
-import 'package:zapizapi/ui/widgets/custom_text_button.dart';
+import 'package:app/ui/widgets/custom_button.dart';
+import 'package:app/ui/widgets/custom_input.dart';
+import 'package:app/ui/widgets/custom_text_button.dart';
 
 // TODO: Implementar sistema de rotas das páginas
 // TODO: Extrair o código para a login_screen
