@@ -4,48 +4,39 @@ class CustomInput extends StatelessWidget {
   final String label;
   final String hint;
   final TextEditingController controller;
+  final ValueChanged<String>? onChanged;
+
   const CustomInput({
     super.key,
     required this.label,
     required this.hint,
     required this.controller,
+    this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<TextEditingValue>(
-      valueListenable: controller,
-      builder: (context, value, child) {
-        // debug: print controller empty state
-        // print('[DEBUG] controller: ${value.text.isEmpty}');
-        return TextFormField(
-          controller: controller,
-          decoration: InputDecoration(
-            // border: OutlineInputBorder(
-            //   borderRadius: BorderRadius.circular(8.0),
-            //   borderSide: BorderSide(color: Colors.red, width: 2.0),
-            // ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8.0),
-              borderSide: BorderSide(
-                color: value.text.isEmpty ? Colors.grey : Colors.blue,
-                width: 2.0,
-              ),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8.0),
-              borderSide: BorderSide(color: Colors.blue, width: 2.5),
-            ),
-            errorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8.0),
-              borderSide: BorderSide(color: Colors.red, width: 2.5),
-            ),
-            labelText: label,
-            hint: Text(hint),
-            fillColor: Colors.red,
-          ),
-        );
-      },
+    return TextField(
+      controller: controller,
+      onChanged: onChanged,
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 16,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: Colors.blue, width: 1.4),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: Colors.blue, width: 2.2),
+        ),
+      ),
     );
   }
 }
