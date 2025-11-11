@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:app/ui/widgets/custom_button.dart';
 import 'package:app/ui/widgets/custom_input.dart';
-import 'package:app/ui/widgets/custom_text_button.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:app/ui/pages/chat_page.dart';
 import 'package:app/ui/widgets/user_presence_tile.dart';
