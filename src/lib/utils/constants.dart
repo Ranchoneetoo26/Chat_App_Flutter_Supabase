@@ -1,2 +1,3 @@
-const supabaseUrl = 'https://YOUR-PROJECT.supabase.co';
-const supabaseAnonKey = 'YOUR-ANON-KEY';
+const supabaseUrl = 'https://ihsluigtpkgasyknldsa.supabase.co';
+const supabaseAnonKey =
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imloc2x1aWd0cGtnYXN5a25sZHNhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA5ODEwOTYsImV4cCI6MjA3NjU1NzA5Nn0.6qyFgAevobykfqxmirmPKvdSeLlM8nMIG_NowlwhHz8';

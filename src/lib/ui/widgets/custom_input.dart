@@ -11,7 +11,7 @@ class CustomInput extends StatelessWidget {
     required this.label,
     required this.hint,
     required this.controller,
-    this.onChanged,
+    this.onChanged, required TextInputType keyboardType, required bool obscureText,
   });
 
   @override
