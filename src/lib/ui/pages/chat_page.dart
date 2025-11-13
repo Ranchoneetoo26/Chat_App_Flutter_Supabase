@@ -1,5 +1,10 @@
+// No arquivo src/lib/ui/pages/chat_page.dart
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:intl/intl.dart';
+// Certifique-se de que o import da intl está correto no seu arquivo:
+// import 'package:intl/intl.dart';
 
 final supabase = Supabase.instance.client;
 
@@ -14,6 +19,11 @@ class _ChatPageState extends State<ChatPage> {
   final TextEditingController messageController = TextEditingController();
   final ScrollController scrollController = ScrollController();
 
+  // ⚠️ ATENÇÃO: SUBSTITUA ESTE VALOR pelo UUID de uma conversa EXISTENTE no seu Supabase.
+  static const String CONVERSATION_ID = 'd0363f19-e924-448a-8a6f-b35c6e488668';
+
+  // Removido get msg => null; que estava incorreto.
+
   @override
   void dispose() {
     messageController.dispose();
@@ -21,6 +31,9 @@ class _ChatPageState extends State<ChatPage> {
     super.dispose();
   }
 
+  // =======================================================================
+  // FUNÇÃO DE ENVIO CORRIGIDA: Inclui sender_id, content_text e conversation_id
+  // =======================================================================
   Future<void> _sendMessage() async {
     final text = messageController.text.trim();
     if (text.isEmpty) return;
@@ -28,13 +41,18 @@ class _ChatPageState extends State<ChatPage> {
     final currentUser = supabase.auth.currentUser;
     if (currentUser == null) return;
 
-    await supabase.from('messages').insert({
-      'user_id': currentUser.id,
-      'content': text,
-    });
+    try {
+      await supabase.from('messages').insert({
+        'sender_id': currentUser.id, // Coluna correta para o remetente
+        'content_text': text, // Coluna correta para o texto
+        'conversation_id': CONVERSATION_ID, // CRÍTICO: ID da conversa para RLS
+      });
 
-    messageController.clear();
-    _scrollToBottom();
+      messageController.clear();
+      _scrollToBottom();
+    } catch (e) {
+      print('❌ FALHA NO ENVIO. ERRO FINAL: $e');
+    }
   }
 
   void _scrollToBottom() {
@@ -48,6 +66,9 @@ class _ChatPageState extends State<ChatPage> {
     });
   }
 
+  // =======================================================================
+  // MÉTODO BUILD CORRIGIDO: Usa JOIN para perfis e FILTRO por conversation_id
+  // =======================================================================
   @override
   Widget build(BuildContext context) {
     final currentUser = supabase.auth.currentUser;
@@ -66,13 +87,21 @@ class _ChatPageState extends State<ChatPage> {
               stream: supabase
                   .from('messages')
                   .select(
-                    'id, content, created_at, user_id, profiles(full_name)',
+                    // SELECT: Colunas corretas do seu esquema (content_text e sender_id)
+                    'id, content_text, created_at, sender_id, profiles!inner(full_name)',
                   )
-                  .order('created_at')
+                  // FILTRO CRÍTICO: Filtra apenas mensagens desta conversa
+                  .eq('conversation_id', CONVERSATION_ID)
+                  // CORREÇÃO CRÍTICA: Ordena os resultados corretamente
+                  .order('created_at', ascending: true)
                   .limit(500)
                   .asStream(),
               builder: (_, snapshot) {
-                if (!snapshot.hasData) return const SizedBox();
+                if (!snapshot.hasData) {
+                  return const Center(
+                    child: Text("Iniciando chat..."),
+                  ); // Mensagem de carregamento
+                }
                 final messages = snapshot.data!;
 
                 return ListView.builder(
@@ -84,11 +113,17 @@ class _ChatPageState extends State<ChatPage> {
                   itemCount: messages.length,
                   itemBuilder: (_, i) {
                     final msg = messages[i];
+
+                    // Lógica para obter o nome do perfil (via JOIN)
                     final userName = msg['profiles']?['full_name'] ?? 'Usuário';
-                    final mine = msg['user_id'] == currentUser?.id;
+
+                    final mine = msg['sender_id'] == currentUser?.id;
+
                     final initials = userName.isNotEmpty
                         ? userName.substring(0, 1).toUpperCase()
                         : '?';
+
+                    // NOTE: Assumindo que DateFormat está corretamente importado
                     final time = DateFormat(
                       'HH:mm',
                     ).format(DateTime.parse(msg['created_at']));
@@ -137,7 +172,7 @@ class _ChatPageState extends State<ChatPage> {
                                     borderRadius: BorderRadius.circular(16),
                                   ),
                                   child: Text(
-                                    msg['content'],
+                                    msg['content_text'],
                                     style: TextStyle(
                                       color: mine
                                           ? Colors.white
@@ -220,4 +255,6 @@ class _ChatPageState extends State<ChatPage> {
   }
 }
 
-DateFormat(String s) {}
+extension on SupabaseStreamBuilder {
+  select(String s) {}
+}

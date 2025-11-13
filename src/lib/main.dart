@@ -5,7 +5,7 @@ import 'package:app/ui/widgets/custom_button.dart';
 import 'package:app/ui/widgets/custom_input.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:app/ui/pages/chat_page.dart';
-import 'package:app/ui/widgets/user_presence_tile.dart';
+import 'package:app/ui/widgets/custom_text_button.dart'; // Importado corretamente
 
 final supabase = Supabase.instance.client;
 const String kPresenceChannelName = 'online_users';
@@ -14,9 +14,11 @@ const Duration kTypingDelay = Duration(seconds: 3);
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // 🚨 AVISO CRÍTICO: SUBSTITUA ESTES VALORES PELOS SEUS REAIS!
   await Supabase.initialize(
-    url: 'COLOQUE SUA URL AQUI', // <- substitua
-    anonKey: 'COLOQUE SUA ANON KEY AQUI', // <- substitua
+    url: 'https://ihsluigtpkgasyknldsa.supabase.co', // <- substitua
+    anonKey:
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imloc2x1aWd0cGtnYXN5a25sZHNhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA5ODEwOTYsImV4cCI6MjA3NjU1NzA5Nn0.6qyFgAevobykfqxmirmPKvdSeLlM8nMIG_NowlwhHz8', // <- substitua
   );
 
   runApp(const MainApp());
@@ -40,9 +42,10 @@ class _MainAppState extends State<MainApp> {
   String? _currentUserId;
   Set<String> _onlineUsers = {};
   String? _typingUserId;
+
   bool _isTyping = false;
   Timer? _typingTimer;
-  bool _isStatusHidden = false;
+  final bool _isStatusHidden = false;
 
   // search results
   List<Map<String, dynamic>> _userSearchResults = [];
@@ -51,11 +54,25 @@ class _MainAppState extends State<MainApp> {
   // cache de nomes (id -> username/full_name)
   final Map<String, Map<String, String>> _userNames = {};
 
+  // =========================================================================
+  // FUNÇÃO AUXILIAR PARA MOSTRAR SNACKBAR
+  // =========================================================================
+  void _showSnackBar(String message, {bool isError = false}) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: isError ? Colors.red : Colors.green,
+        ),
+      );
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     _initSupabaseAuthListener();
-    _setupPresenceSubscription(); // já existe
+    _setupPresenceSubscription();
   }
 
   void _initSupabaseAuthListener() {
@@ -166,9 +183,6 @@ class _MainAppState extends State<MainApp> {
     } catch (_) {}
   }
 
-  // -------------------------
-  // Typing indicator handler
-  // -------------------------
   void _onChatInputChanged(String text) {
     if (text.isEmpty) {
       if (_isTyping) {
@@ -190,9 +204,47 @@ class _MainAppState extends State<MainApp> {
       _trackUserStatus();
     });
   }
+  // -------------------------
 
   // -------------------------
-  // Busca (profiles e groups) - mais precisa
+  // Auth helpers (CORRIGIDO: Adicionado tratamento de erro)
+  // -------------------------
+  void _cadastrarUsuario() async {
+    final email = emailController.text.trim();
+    final pass = passwordController.text.trim();
+    if (email.isEmpty || pass.isEmpty) {
+      _showSnackBar("Por favor, preencha o e-mail e a senha.", isError: true);
+      return;
+    }
+
+    try {
+      // O await aqui é crucial
+      await supabase.auth.signUp(email: email, password: pass);
+      //ver pq isso esta acusano erro
+      _showSnackBar(
+        "✅ Cadastro iniciado! Verifique seu email para confirmação.",
+        isError: false,
+      );
+    } on AuthException catch (e) {
+      print('❌ Erro no Cadastro: ${e.message}');
+      _showSnackBar("Falha no Cadastro: ${e.message}", isError: true);
+    } catch (e) {
+      print('❌ Erro inesperado no Cadastro: $e');
+      _showSnackBar(
+        "Erro inesperado. Verifique sua conexão e chaves.",
+        isError: true,
+      );
+    }
+  }
+
+  void _logout() async {
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {}
+  }
+
+  // -------------------------
+  // Outros helpers (Manter para integridade da classe)
   // -------------------------
   Future<List<Map<String, dynamic>>> _searchUsers(String query) async {
     if (query.isEmpty) return [];
@@ -242,250 +294,6 @@ class _MainAppState extends State<MainApp> {
     });
   }
 
-  // -------------------------
-  // Auth helpers
-  // -------------------------
-  void _cadastrarUsuario() async {
-    final email = emailController.text.trim();
-    final pass = passwordController.text.trim();
-    if (email.isEmpty || pass.isEmpty) return;
-
-    try {
-      await supabase.auth.signUp(email: email, password: pass);
-    } catch (e) {}
-  }
-
-  void _logout() async {
-    try {
-      await supabase.auth.signOut();
-    } catch (e) {}
-  }
-
-  // -------------------------
-  // UI
-  // -------------------------
-  @override
-  void dispose() {
-    _removePresenceSubscription();
-    emailController.dispose();
-    passwordController.dispose();
-    searchController.dispose();
-    _typingTimer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<AuthState>(
-      stream: supabase.auth.onAuthStateChange,
-      builder: (context, snapshot) {
-        final loggedIn = snapshot.data?.session != null;
-
-        return MaterialApp(
-          debugShowCheckedModeBanner: false,
-          theme: ThemeData(
-            primarySwatch: Colors.blue,
-            scaffoldBackgroundColor: const Color(0xFFF1F4FF),
-            appBarTheme: const AppBarTheme(
-              backgroundColor: Colors.blue,
-              foregroundColor: Colors.white,
-              elevation: 2,
-            ),
-          ),
-          home: loggedIn ? _buildChatScreen() : _buildLoginScreen(),
-        );
-      },
-    );
-  }
-
-  Widget _buildLoginScreen() {
-    return Scaffold(
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 520),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                CustomInput(
-                  label: "Email",
-                  controller: emailController,
-                  hint: 'seu@email.com',
-                ),
-                const SizedBox(height: 12),
-                CustomInput(
-                  label: "Senha",
-                  controller: passwordController,
-                  hint: 'senha',
-                ),
-                const SizedBox(height: 20),
-                CustomButton(
-                  buttonText: "Entrar",
-                  onPressed: () {
-                    supabase.auth.signInWithPassword(
-                      email: emailController.text.trim(),
-                      password: passwordController.text.trim(),
-                    );
-                  },
-                  backgroundColor: Colors.blue,
-                ),
-                const SizedBox(height: 12),
-                CustomTextButton(
-                  buttonText: "Cadastrar",
-                  onPressed: _cadastrarUsuario,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildChatScreen() {
-    return const ChatPage();
-  }
-
-  Widget _buildPresenceTab() {
-    final userId = _currentUserId;
-
-    return ListView(
-      padding: const EdgeInsets.all(24),
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                _typingUserId != null
-                    ? "Usuário ${_displayName(_typingUserId!)} está digitando..."
-                    : "Ninguém digitando no momento",
-                style: const TextStyle(fontSize: 14, color: Colors.blue),
-              ),
-            ),
-            Switch(
-              value: _isStatusHidden,
-              onChanged: (v) {
-                setState(() => _isStatusHidden = v);
-                _trackUserStatus();
-              },
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        CustomInput(
-          onChanged: _onChatInputChanged,
-          label: "Mensagem",
-          hint: "Escreva algo para testar 'digitando'...",
-          controller: TextEditingController(),
-        ),
-        const SizedBox(height: 24),
-        Text(
-          "Usuários online (${_onlineUsers.length}):",
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 12),
-        ..._onlineUsers.map((u) {
-          final display = _displayName(u);
-          return UserPresenceTile(
-            displayName: u == userId ? "Você ($display)" : display,
-            isOnline: true,
-            onTap: () {},
-          );
-        }),
-        const SizedBox(height: 24),
-        CustomButton(
-          buttonText: "Logout",
-          backgroundColor: Colors.red,
-          onPressed: _logout,
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSearchTab() {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: CustomInput(
-            controller: searchController,
-            onChanged: _runSearch,
-            label: "Buscar usuários ou grupos",
-            hint: "Digite um nome...",
-          ),
-        ),
-        Expanded(
-          child: ListView(
-            children: [
-              if (_userSearchResults.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Text(
-                    'Usuários (${_userSearchResults.length})',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ..._userSearchResults.map((u) {
-                final name = u['username'] ?? u['full_name'] ?? u['id'];
-                return ListTile(
-                  leading: CircleAvatar(
-                    child: Text((name as String).isNotEmpty ? name[0] : '?'),
-                  ),
-                  title: Text(name),
-                  subtitle: Text(
-                    'ID: ${u['id']} • criado: ${u['created_at'] ?? '-'}',
-                  ),
-                );
-              }),
-              if (_groupSearchResults.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Text(
-                    'Grupos (${_groupSearchResults.length})',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ..._groupSearchResults.map((g) {
-                return ListTile(
-                  leading: const Icon(Icons.group),
-                  title: Text(g['name'] ?? 'Grupo'),
-                  subtitle: Text('ID: ${g['id']}'),
-                );
-              }),
-              if (_userSearchResults.isEmpty && _groupSearchResults.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Center(child: Text('Nenhum resultado')),
-                ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildReactionsTab() {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text('Reaja a uma mensagem:'),
-          const SizedBox(height: 12),
-          MessageReactions(
-            onReact: (reaction) {
-              print('Reação selecionada: $reaction');
-              // Aqui pode integrar com backend
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  // -------------------------
-  // Helpers
-  // -------------------------
   Future<void> _loadUserName(String userId) async {
     if (_userNames.containsKey(userId)) return;
 
@@ -516,22 +324,146 @@ class _MainAppState extends State<MainApp> {
 
     return userId;
   }
+  // -------------------------
+
+  @override
+  void dispose() {
+    _removePresenceSubscription();
+    emailController.dispose();
+    passwordController.dispose();
+    searchController.dispose();
+    _typingTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // O StreamBuilder é mantido, mas o redirecionamento é controlado.
+    return StreamBuilder<AuthState>(
+      stream: supabase.auth.onAuthStateChange,
+      builder: (context, snapshot) {
+        final loggedIn = snapshot.data?.session != null;
+
+        return MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(
+            primarySwatch: Colors.blue,
+            scaffoldBackgroundColor: const Color(0xFFF1F4FF),
+            appBarTheme: const AppBarTheme(
+              backgroundColor: Colors.blue,
+              foregroundColor: Colors.white,
+              elevation: 2,
+            ),
+          ),
+          home: loggedIn ? const ChatPage() : _buildLoginScreen(),
+        );
+      },
+    );
+  }
+
+  // =========================================================================
+  // TELA DE LOGIN CORRIGIDA (CORRIGIDO: Parâmetros do CustomInput)
+  // =========================================================================
+  Widget _buildLoginScreen() {
+    return Scaffold(
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Remova ou substitua esta linha se não tiver o logo em assets/logos/logo_login.png
+                // Image.asset('assets/logos/logo_login.png', height: 100),
+                const SizedBox(height: 32),
+
+                // CAMPO DE EMAIL CORRIGIDO
+                // CAMPO DE EMAIL CORRIGIDO
+                // ... dentro de _buildLoginScreen()...
+
+                // CAMPO DE EMAIL CORRIGIDO
+                CustomInput(
+                  controller: emailController,
+                  label: "Email",
+                  hint: 'seu@email.com',
+                  keyboardType: TextInputType.emailAddress,
+                  obscureText: false, // O email não deve ser ocultado
+                ),
+                const SizedBox(height: 16),
+
+                // CAMPO DE SENHA CORRIGIDO
+                CustomInput(
+                  controller: passwordController,
+                  label: "Senha",
+                  hint: 'senha',
+                  obscureText: true, // OBRIGATÓRIO: Oculta o texto
+                  keyboardType: TextInputType
+                      .text, // OBRIGATÓRIO: Tipo de teclado para senhas
+                ),
+                const SizedBox(height: 20),
+
+                // ... continua com os botões Entrar e Cadastrar
+
+                // BOTÃO ENTRAR (com a lógica de login corrigida)
+                CustomButton(
+                  buttonText: "Entrar",
+                  onPressed: () async {
+                    if (emailController.text.trim().isEmpty ||
+                        passwordController.text.trim().isEmpty) {
+                      _showSnackBar(
+                        "Preencha o e-mail e a senha.",
+                        isError: true,
+                      );
+                      return;
+                    }
+                    try {
+                      await supabase.auth.signInWithPassword(
+                        email: emailController.text.trim(),
+                        password: passwordController.text.trim(),
+                      );
+                      _showSnackBar("Login bem-sucedido!", isError: false);
+                    } on AuthException catch (e) {
+                      print('❌ Erro no Login: ${e.message}');
+                      _showSnackBar(
+                        "Falha no Login: ${e.message}",
+                        isError: true,
+                      );
+                    } catch (e) {
+                      print('❌ Erro inesperado no Login: $e');
+                      _showSnackBar(
+                        "Erro inesperado. Verifique sua conexão e chaves.",
+                        isError: true,
+                      );
+                    }
+                  },
+                  backgroundColor: Colors.blue,
+                ),
+                const SizedBox(height: 12),
+
+                // BOTÃO CADASTRAR (Chama a função corrigida)
+                CustomTextButton(
+                  buttonText: "Cadastrar",
+                  onPressed: _cadastrarUsuario,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
+// Extensões e outros widgets auxiliares mantidos para integridade do código original
 extension on RealtimePresence {
   Future<void> untrack() async {}
-
   Future<void> track(Map<String, Object?> map) async {}
 }
 
-// -------------------------
-// Widget de Reações
-// -------------------------
 class MessageReactions extends StatefulWidget {
   final void Function(String reaction)? onReact;
-
   const MessageReactions({super.key, this.onReact});
-
   @override
   State<MessageReactions> createState() => _MessageReactionsState();
 }
@@ -539,7 +471,6 @@ class MessageReactions extends StatefulWidget {
 class _MessageReactionsState extends State<MessageReactions> {
   String? selectedReaction;
   final List<String> reactions = ['👍', '❤️', '😂', '😮', '😢'];
-
   @override
   Widget build(BuildContext context) {
     return Row(
@@ -566,28 +497,6 @@ class _MessageReactionsState extends State<MessageReactions> {
           ),
         );
       }).toList(),
-    );
-  }
-}
-
-// --- MODIFICAÇÃO NO SEU WIDGET ---
-// Adicionei o parâmetro onPressed ao seu CustomTextButton
-// para que possamos clicar nele.
-
-class CustomTextButton extends StatelessWidget {
-  final String buttonText;
-  final VoidCallback onPressed; // Adicione esta linha
-  const CustomTextButton({
-    super.key,
-    required this.buttonText,
-    required this.onPressed, // Adicione esta linha
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return TextButton(
-      onPressed: onPressed, // Adicione esta linha
-      child: Text(buttonText, style: TextStyle(color: Color(0xFF0F4888))),
     );
   }
 }
