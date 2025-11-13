@@ -97,10 +97,11 @@ class _ChatPageState extends State<ChatPage> {
                   .limit(500)
                   .asStream(),
               builder: (_, snapshot) {
-                if (!snapshot.hasData)
+                if (!snapshot.hasData) {
                   return const Center(
                     child: Text("Iniciando chat..."),
                   ); // Mensagem de carregamento
+                }
                 final messages = snapshot.data!;
 
                 return ListView.builder(

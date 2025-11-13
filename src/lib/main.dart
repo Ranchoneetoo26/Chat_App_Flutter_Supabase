@@ -5,7 +5,6 @@ import 'package:app/ui/widgets/custom_button.dart';
 import 'package:app/ui/widgets/custom_input.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:app/ui/pages/chat_page.dart';
-import 'package:app/ui/widgets/user_presence_tile.dart';
 import 'package:app/ui/widgets/custom_text_button.dart'; // Importado corretamente
 
 final supabase = Supabase.instance.client;
@@ -43,9 +42,10 @@ class _MainAppState extends State<MainApp> {
   String? _currentUserId;
   Set<String> _onlineUsers = {};
   String? _typingUserId;
+
   bool _isTyping = false;
   Timer? _typingTimer;
-  bool _isStatusHidden = false;
+  final bool _isStatusHidden = false;
 
   // search results
   List<Map<String, dynamic>> _userSearchResults = [];
