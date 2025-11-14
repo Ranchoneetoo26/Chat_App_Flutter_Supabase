@@ -1,11 +1,10 @@
-// lib/main.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:app/ui/widgets/custom_button.dart';
-import 'package:app/ui/widgets/custom_input.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:app/ui/pages/chat_page.dart';
-import 'package:app/ui/widgets/custom_text_button.dart'; // Importado corretamente
+import 'package:app/ui/widgets/custom_button.dart';
+import 'package:app/ui/widgets/custom_input.dart';
+import 'package:app/ui/widgets/custom_text_button.dart';
 
 final supabase = Supabase.instance.client;
 const String kPresenceChannelName = 'online_users';
@@ -16,9 +15,9 @@ Future<void> main() async {
 
   // 🚨 AVISO CRÍTICO: SUBSTITUA ESTES VALORES PELOS SEUS REAIS!
   await Supabase.initialize(
-    url: 'https://ihsluigtpkgasyknldsa.supabase.co', // <- substitua
+    url: 'https://ihsluigtpkgasyknldsa.supabase.co',
     anonKey:
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imloc2x1aWd0cGtnYXN5a25sZHNhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA5ODEwOTYsImV4cCI6MjA3NjU1NzA5Nn0.6qyFgAevobykfqxmirmPKvdSeLlM8nMIG_NowlwhHz8', // <- substitua
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imloc2x1aWd0cGtnYXN5a25sZHNhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA5ODEwOTYsImV4cCI6MjA3NjU1NzA5Nn0.6qyFgAevobykfqxmirmPKvdSeLlM8nMIG_NowlwhHz8',
   );
 
   runApp(const MainApp());
@@ -36,28 +35,21 @@ class _MainAppState extends State<MainApp> {
   final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
   final TextEditingController searchController = TextEditingController();
+  final _formKey = GlobalKey<FormState>(); // Chave para o Form
 
-  // presence
+  // presence & auth state
   late RealtimeChannel _presenceChannel;
   String? _currentUserId;
   Set<String> _onlineUsers = {};
-  String? _typingUserId;
-
-  bool _isTyping = false;
+  final bool _isTyping = false;
   Timer? _typingTimer;
   final bool _isStatusHidden = false;
-
-  // search results
-  List<Map<String, dynamic>> _userSearchResults = [];
-  List<Map<String, dynamic>> _groupSearchResults = [];
-
-  // cache de nomes (id -> username/full_name)
   final Map<String, Map<String, String>> _userNames = {};
+  
+  // Variáveis removidas para limpar warnings: _typingUserId, _userSearchResults, _groupSearchResults
 
-  // =========================================================================
-  // FUNÇÃO AUXILIAR PARA MOSTRAR SNACKBAR
-  // =========================================================================
-  void _showSnackBar(String message, {bool isError = false}) {
+  // 🚨 CORREÇÃO: Função _showSnackBar agora aceita um BuildContext explícito
+  void _showSnackBar(BuildContext context, String message, {bool isError = false}) {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -76,13 +68,11 @@ class _MainAppState extends State<MainApp> {
   }
 
   void _initSupabaseAuthListener() {
-    // if already logged
     if (supabase.auth.currentUser != null) {
       _currentUserId = supabase.auth.currentUser!.id;
       _setupPresenceSubscription();
     }
 
-    // listen auth changes
     supabase.auth.onAuthStateChange.listen((data) {
       final event = data.event;
       final session = data.session;
@@ -95,17 +85,11 @@ class _MainAppState extends State<MainApp> {
         _currentUserId = null;
         setState(() {
           _onlineUsers = {};
-          _typingUserId = null;
-          _userSearchResults = [];
-          _groupSearchResults = [];
         });
       }
     });
   }
 
-  // -------------------------
-  // PRESENCE: setup / track / remove
-  // -------------------------
   void _setupPresenceSubscription() {
     if (_currentUserId == null) return;
 
@@ -135,16 +119,17 @@ class _MainAppState extends State<MainApp> {
             _loadUserName(userId);
 
             if (!hidden) onlineUsers.add(userId);
-            if (status == 'typing' && userId != _currentUserId) {
-              typingUser = userId;
-            }
+            // Removido o uso de _typingUserId pois estava causando warnings e não estava sendo usado na tela
+            // if (status == 'typing' && userId != _currentUserId) {
+            //   typingUser = userId;
+            // }
           }
         });
       }
 
       setState(() {
         _onlineUsers = onlineUsers;
-        _typingUserId = typingUser;
+        // _typingUserId = typingUser; // Removido
       });
     });
 
@@ -183,116 +168,31 @@ class _MainAppState extends State<MainApp> {
     } catch (_) {}
   }
 
-  void _onChatInputChanged(String text) {
-    if (text.isEmpty) {
-      if (_isTyping) {
-        _typingTimer?.cancel();
-        setState(() => _isTyping = false);
-        _trackUserStatus();
-      }
-      return;
-    }
-
-    if (!_isTyping) {
-      setState(() => _isTyping = true);
-      _trackUserStatus();
-    }
-
-    _typingTimer?.cancel();
-    _typingTimer = Timer(kTypingDelay, () {
-      setState(() => _isTyping = false);
-      _trackUserStatus();
-    });
-  }
-  // -------------------------
-
-  // -------------------------
-  // Auth helpers (CORRIGIDO: Adicionado tratamento de erro)
-  // -------------------------
-  void _cadastrarUsuario() async {
+  // 🚨 CORREÇÃO: Função _cadastrarUsuario agora aceita o BuildContext
+  void _cadastrarUsuario(BuildContext context) async {
     final email = emailController.text.trim();
     final pass = passwordController.text.trim();
-    if (email.isEmpty || pass.isEmpty) {
-      _showSnackBar("Por favor, preencha o e-mail e a senha.", isError: true);
-      return;
-    }
 
     try {
-      // O await aqui é crucial
       await supabase.auth.signUp(email: email, password: pass);
-      //ver pq isso esta acusano erro
       _showSnackBar(
+        context,
         "✅ Cadastro iniciado! Verifique seu email para confirmação.",
         isError: false,
       );
     } on AuthException catch (e) {
-      print('❌ Erro no Cadastro: ${e.message}');
-      _showSnackBar("Falha no Cadastro: ${e.message}", isError: true);
+      _showSnackBar(context, "Falha no Cadastro: ${e.message}", isError: true);
     } catch (e) {
-      print('❌ Erro inesperado no Cadastro: $e');
       _showSnackBar(
+        context,
         "Erro inesperado. Verifique sua conexão e chaves.",
         isError: true,
       );
     }
   }
-
-  void _logout() async {
-    try {
-      await supabase.auth.signOut();
-    } catch (e) {}
-  }
-
-  // -------------------------
-  // Outros helpers (Manter para integridade da classe)
-  // -------------------------
-  Future<List<Map<String, dynamic>>> _searchUsers(String query) async {
-    if (query.isEmpty) return [];
-    try {
-      final res = await supabase
-          .from('profiles')
-          .select('id, username, full_name, created_at')
-          .ilike('username', '%$query%')
-          .or('full_name.ilike.%$query%')
-          .limit(20);
-      return (res as List<dynamic>).cast<Map<String, dynamic>>();
-    } catch (e) {
-      return [];
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> _searchGroups(String query) async {
-    if (query.isEmpty) return [];
-    try {
-      final res = await supabase
-          .from('groups')
-          .select('id, name')
-          .eq('is_public', true)
-          .ilike('name', '%$query%')
-          .limit(20);
-      return (res as List<dynamic>).cast<Map<String, dynamic>>();
-    } catch (e) {
-      return [];
-    }
-  }
-
-  void _runSearch(String query) async {
-    if (query.isEmpty) {
-      setState(() {
-        _userSearchResults = [];
-        _groupSearchResults = [];
-      });
-      return;
-    }
-
-    final users = await _searchUsers(query);
-    final groups = await _searchGroups(query);
-
-    setState(() {
-      _userSearchResults = users;
-      _groupSearchResults = groups;
-    });
-  }
+  
+  // Funções de Busca e Auxiliares Removidas, pois não estavam sendo usadas no Build
+  // (Ex.: _searchUsers, _searchGroups, _runSearch) para limpar warnings.
 
   Future<void> _loadUserName(String userId) async {
     if (_userNames.containsKey(userId)) return;
@@ -324,7 +224,6 @@ class _MainAppState extends State<MainApp> {
 
     return userId;
   }
-  // -------------------------
 
   @override
   void dispose() {
@@ -338,7 +237,6 @@ class _MainAppState extends State<MainApp> {
 
   @override
   Widget build(BuildContext context) {
-    // O StreamBuilder é mantido, mas o redirecionamento é controlado.
     return StreamBuilder<AuthState>(
       stream: supabase.auth.onAuthStateChange,
       builder: (context, snapshot) {
@@ -361,9 +259,7 @@ class _MainAppState extends State<MainApp> {
     );
   }
 
-  // =========================================================================
-  // TELA DE LOGIN CORRIGIDA (CORRIGIDO: Parâmetros do CustomInput)
-  // =========================================================================
+  // 🚨 CORREÇÃO PRINCIPAL: Usando Builder para obter um contexto válido abaixo do Scaffold.
   Widget _buildLoginScreen() {
     return Scaffold(
       body: Center(
@@ -371,82 +267,97 @@ class _MainAppState extends State<MainApp> {
           padding: const EdgeInsets.all(24),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 520),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Remova ou substitua esta linha se não tiver o logo em assets/logos/logo_login.png
-                // Image.asset('assets/logos/logo_login.png', height: 100),
-                const SizedBox(height: 32),
+            // O Builder garante que o contexto (innerContext) aqui está ABAIXO do Scaffold
+            child: Builder(
+              builder: (innerContext) { 
+                return Form(
+                  key: _formKey,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox(height: 32),
+                      
+                      // CAMPO DE EMAIL COM VALIDADOR
+                      CustomInput(
+                        controller: emailController,
+                        label: "Email",
+                        hint: 'seu@email.com',
+                        keyboardType: TextInputType.emailAddress,
+                        obscureText: false,
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Por favor, insira seu email.';
+                          }
+                          if (!value.contains('@') || !value.contains('.')) {
+                            return 'Email inválido. Verifique o formato.';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
 
-                // CAMPO DE EMAIL CORRIGIDO
-                // CAMPO DE EMAIL CORRIGIDO
-                // ... dentro de _buildLoginScreen()...
+                      // CAMPO DE SENHA COM VALIDADOR
+                      CustomInput(
+                        controller: passwordController,
+                        label: "Senha",
+                        hint: 'senha',
+                        obscureText: true,
+                        keyboardType: TextInputType.text,
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Por favor, insira sua senha.';
+                          }
+                          if (value.length < 6) {
+                            return 'A senha deve ter no mínimo 6 caracteres.';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 20),
 
-                // CAMPO DE EMAIL CORRIGIDO
-                CustomInput(
-                  controller: emailController,
-                  label: "Email",
-                  hint: 'seu@email.com',
-                  keyboardType: TextInputType.emailAddress,
-                  obscureText: false, // O email não deve ser ocultado
-                ),
-                const SizedBox(height: 16),
+                      // BOTÃO ENTRAR
+                      CustomButton(
+                        buttonText: "Entrar",
+                        onPressed: () async {
+                          if (_formKey.currentState!.validate()) {
+                            try {
+                              await supabase.auth.signInWithPassword(
+                                email: emailController.text.trim(),
+                                password: passwordController.text.trim(),
+                              );
+                              _showSnackBar(innerContext, "Login bem-sucedido!", isError: false);
+                            } on AuthException catch (e) {
+                              _showSnackBar(
+                                innerContext,
+                                "Falha no Login: ${e.message}",
+                                isError: true,
+                              );
+                            } catch (e) {
+                              _showSnackBar(
+                                innerContext,
+                                "Erro inesperado. Verifique sua conexão.",
+                                isError: true,
+                              );
+                            }
+                          }
+                        },
+                        backgroundColor: Colors.blue,
+                      ),
+                      const SizedBox(height: 12),
 
-                // CAMPO DE SENHA CORRIGIDO
-                CustomInput(
-                  controller: passwordController,
-                  label: "Senha",
-                  hint: 'senha',
-                  obscureText: true, // OBRIGATÓRIO: Oculta o texto
-                  keyboardType: TextInputType
-                      .text, // OBRIGATÓRIO: Tipo de teclado para senhas
-                ),
-                const SizedBox(height: 20),
-
-                // ... continua com os botões Entrar e Cadastrar
-
-                // BOTÃO ENTRAR (com a lógica de login corrigida)
-                CustomButton(
-                  buttonText: "Entrar",
-                  onPressed: () async {
-                    if (emailController.text.trim().isEmpty ||
-                        passwordController.text.trim().isEmpty) {
-                      _showSnackBar(
-                        "Preencha o e-mail e a senha.",
-                        isError: true,
-                      );
-                      return;
-                    }
-                    try {
-                      await supabase.auth.signInWithPassword(
-                        email: emailController.text.trim(),
-                        password: passwordController.text.trim(),
-                      );
-                      _showSnackBar("Login bem-sucedido!", isError: false);
-                    } on AuthException catch (e) {
-                      print('❌ Erro no Login: ${e.message}');
-                      _showSnackBar(
-                        "Falha no Login: ${e.message}",
-                        isError: true,
-                      );
-                    } catch (e) {
-                      print('❌ Erro inesperado no Login: $e');
-                      _showSnackBar(
-                        "Erro inesperado. Verifique sua conexão e chaves.",
-                        isError: true,
-                      );
-                    }
-                  },
-                  backgroundColor: Colors.blue,
-                ),
-                const SizedBox(height: 12),
-
-                // BOTÃO CADASTRAR (Chama a função corrigida)
-                CustomTextButton(
-                  buttonText: "Cadastrar",
-                  onPressed: _cadastrarUsuario,
-                ),
-              ],
+                      // BOTÃO CADASTRAR
+                      CustomTextButton(
+                        buttonText: "Cadastrar",
+                        onPressed: () {
+                          if (_formKey.currentState!.validate()) {
+                            _cadastrarUsuario(innerContext);
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
           ),
         ),
@@ -455,7 +366,7 @@ class _MainAppState extends State<MainApp> {
   }
 }
 
-// Extensões e outros widgets auxiliares mantidos para integridade do código original
+// Extensões e Widgets Auxiliares
 extension on RealtimePresence {
   Future<void> untrack() async {}
   Future<void> track(Map<String, Object?> map) async {}

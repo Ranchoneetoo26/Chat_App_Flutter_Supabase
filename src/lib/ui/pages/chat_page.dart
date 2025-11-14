@@ -1,12 +1,10 @@
-// No arquivo src/lib/ui/pages/chat_page.dart
+// lib/ui/pages/chat_page.dart
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
-// Certifique-se de que o import da intl está correto no seu arquivo:
-// import 'package:intl/intl.dart';
-
-final supabase = Supabase.instance.client;
+import '../../main.dart'; // Para acessar a instância global do Supabase
+import 'profile_page.dart'; // Importar a página de perfil
 
 class ChatPage extends StatefulWidget {
   const ChatPage({super.key});
@@ -19,10 +17,9 @@ class _ChatPageState extends State<ChatPage> {
   final TextEditingController messageController = TextEditingController();
   final ScrollController scrollController = ScrollController();
 
-  // ⚠️ ATENÇÃO: SUBSTITUA ESTE VALOR pelo UUID de uma conversa EXISTENTE no seu Supabase.
+  // ⚠️ CRÍTICO: SUBSTITUA PELO ID REAL de uma conversa que o usuário logado participa.
+  // Se esta conversa não existe ou o RLS a bloqueia, NENHUMA mensagem será exibida/enviada.
   static const String CONVERSATION_ID = 'd0363f19-e924-448a-8a6f-b35c6e488668';
-
-  // Removido get msg => null; que estava incorreto.
 
   @override
   void dispose() {
@@ -31,8 +28,20 @@ class _ChatPageState extends State<ChatPage> {
     super.dispose();
   }
 
+  // --- Função Auxiliar de SnackBar para Feedback nesta tela ---
+  void _showSnackBar(BuildContext context, String message, {bool isError = false}) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: isError ? Colors.red : Colors.green,
+        ),
+      );
+    }
+  }
+
   // =======================================================================
-  // FUNÇÃO DE ENVIO CORRIGIDA: Inclui sender_id, content_text e conversation_id
+  // FUNÇÃO DE ENVIO DE MENSAGEM
   // =======================================================================
   Future<void> _sendMessage() async {
     final text = messageController.text.trim();
@@ -43,15 +52,16 @@ class _ChatPageState extends State<ChatPage> {
 
     try {
       await supabase.from('messages').insert({
-        'sender_id': currentUser.id, // Coluna correta para o remetente
-        'content_text': text, // Coluna correta para o texto
-        'conversation_id': CONVERSATION_ID, // CRÍTICO: ID da conversa para RLS
+        'sender_id': currentUser.id,
+        'content_text': text,
+        'conversation_id': CONVERSATION_ID, 
       });
 
       messageController.clear();
       _scrollToBottom();
     } catch (e) {
-      print('❌ FALHA NO ENVIO. ERRO FINAL: $e');
+      print('❌ FALHA NO ENVIO. ERRO: $e');
+      _showSnackBar(context, 'Falha ao enviar mensagem. Verifique a tabela messages.', isError: true);
     }
   }
 
@@ -67,7 +77,7 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   // =======================================================================
-  // MÉTODO BUILD CORRIGIDO: Usa JOIN para perfis e FILTRO por conversation_id
+  // MÉTODO BUILD: Inclui StreamBuilder e Drawer para navegação
   // =======================================================================
   @override
   Widget build(BuildContext context) {
@@ -76,10 +86,47 @@ class _ChatPageState extends State<ChatPage> {
     return Scaffold(
       backgroundColor: const Color(0xFFF7FAFF),
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
         title: const Text("Chat", style: TextStyle(color: Colors.black)),
+        // Adiciona o ícone de menu (hambúrguer)
       ),
+      
+      // 1. ADICIONANDO DRAWER (MENU LATERAL) PARA PERFIL E LOGOUT
+      drawer: Drawer(
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: <Widget>[
+            const DrawerHeader(
+              decoration: BoxDecoration(color: Colors.blue),
+              child: Text(
+                'Menu',
+                style: TextStyle(color: Colors.white, fontSize: 24),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.person),
+              title: const Text('Meu Perfil'),
+              onTap: () {
+                Navigator.pop(context); // Fecha o Drawer
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => const ProfilePage(),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.logout),
+              title: const Text('Sair'),
+              onTap: () async {
+                Navigator.pop(context); // Fecha o Drawer
+                await supabase.auth.signOut();
+                // O main.dart cuida do redirecionamento
+              },
+            ),
+          ],
+        ),
+      ),
+
       body: Column(
         children: [
           Expanded(
@@ -87,22 +134,30 @@ class _ChatPageState extends State<ChatPage> {
               stream: supabase
                   .from('messages')
                   .select(
-                    // SELECT: Colunas corretas do seu esquema (content_text e sender_id)
                     'id, content_text, created_at, sender_id, profiles!inner(full_name)',
                   )
-                  // FILTRO CRÍTICO: Filtra apenas mensagens desta conversa
+                  // CRÍTICO: Filtra apenas mensagens desta conversa
                   .eq('conversation_id', CONVERSATION_ID)
-                  // CORREÇÃO CRÍTICA: Ordena os resultados corretamente
                   .order('created_at', ascending: true)
                   .limit(500)
                   .asStream(),
               builder: (_, snapshot) {
-                if (!snapshot.hasData) {
-                  return const Center(
-                    child: Text("Iniciando chat..."),
-                  ); // Mensagem de carregamento
+                if (snapshot.hasError) {
+                   // Exibe erro do Supabase (ex: RLS, coluna faltando)
+                   print('Stream Error: ${snapshot.error}');
+                   return Center(child: Text('Erro de carregamento: ${snapshot.error}', textAlign: TextAlign.center));
                 }
+                
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator()); // Indicador de carregamento
+                }
+                
                 final messages = snapshot.data!;
+                
+                // ⚠️ Se 'messages.isEmpty' mas há mensagens no DB, o problema é RLS ou CONVERSATION_ID.
+                if (messages.isEmpty) {
+                   return const Center(child: Text("Nenhuma mensagem nesta conversa. Comece a digitar!"));
+                }
 
                 return ListView.builder(
                   controller: scrollController,
@@ -113,20 +168,13 @@ class _ChatPageState extends State<ChatPage> {
                   itemCount: messages.length,
                   itemBuilder: (_, i) {
                     final msg = messages[i];
-
-                    // Lógica para obter o nome do perfil (via JOIN)
-                    final userName = msg['profiles']?['full_name'] ?? 'Usuário';
-
+                    final userName = msg['profiles']?['full_name'] ?? 'Usuário Desconhecido';
                     final mine = msg['sender_id'] == currentUser?.id;
-
                     final initials = userName.isNotEmpty
                         ? userName.substring(0, 1).toUpperCase()
                         : '?';
-
-                    // NOTE: Assumindo que DateFormat está corretamente importado
-                    final time = DateFormat(
-                      'HH:mm',
-                    ).format(DateTime.parse(msg['created_at']));
+                    
+                    final time = DateFormat('HH:mm').format(DateTime.parse(msg['created_at']));
 
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -204,6 +252,7 @@ class _ChatPageState extends State<ChatPage> {
             ),
           ),
 
+          // CAMPO DE INPUT DE MENSAGEM
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             color: Colors.white,
@@ -253,8 +302,4 @@ class _ChatPageState extends State<ChatPage> {
       ),
     );
   }
-}
-
-extension on SupabaseStreamBuilder {
-  select(String s) {}
 }
