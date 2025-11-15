@@ -31,6 +31,8 @@ class _ChatPageState extends State<ChatPage> {
   Timer? _typingTimer;
   bool _isStatusHidden = false;
   final Map<String, String> _userNames = {};
+  bool _isSending = false;
+  String? _editingMessageId;
 
   // Valor padrão (exemplo). Recomendo passar `conversationId` via navegação.
   static const String _kDefaultConversationId =
@@ -72,28 +74,57 @@ class _ChatPageState extends State<ChatPage> {
     final currentUser = supabase.auth.currentUser;
     if (currentUser == null) return;
 
+    final convId = widget.conversationId ?? _kDefaultConversationId;
+
+    // If we are editing an existing message, call update
+    if (_editingMessageId != null) {
+      final editId = _editingMessageId!;
+      try {
+        await _chatService.updateMessage(messageId: editId, newText: text);
+        if (mounted) _showSnackBar(context, 'Mensagem editada.');
+      } catch (e) {
+        debugPrint('update message error: $e');
+        if (mounted)
+          _showSnackBar(context, 'Falha ao editar: $e', isError: true);
+      } finally {
+        _editingMessageId = null;
+        messageController.clear();
+      }
+      return;
+    }
+
+    // Sending new message with a 2s perception timeout.
+    _isSending = true;
+    if (mounted) setState(() {});
+
     try {
-      final convId = widget.conversationId ?? _kDefaultConversationId;
-      await supabase.from('messages').insert({
-        'sender_id': currentUser.id,
-        'content_text': text,
-        'conversation_id': convId,
+      // try complete within 2 seconds for positive feedback
+      await _chatService
+          .sendMessage(convId, currentUser.id, text)
+          .timeout(const Duration(seconds: 2));
+
+      // success within 2s
+      if (mounted) _showSnackBar(context, 'Enviado');
+    } on TimeoutException {
+      // didn't finish within 2s — show pending and continue sending in background
+      if (mounted) _showSnackBar(context, 'Envio pendente...');
+      // Retry in background without timeout (or let supabase handle eventual consistency)
+      _chatService.sendMessage(convId, currentUser.id, text).catchError((e) {
+        debugPrint('background send error: $e');
+        if (mounted)
+          _showSnackBar(context, 'Falha no envio: $e', isError: true);
       });
-
-      // Depois de enviar, informe que não está mais digitando
-      _trackUserStatus(typing: false);
-
-      messageController.clear();
-      _scrollToBottom();
     } catch (e) {
       debugPrint('❌ FALHA NO ENVIO. ERRO: $e');
       if (mounted) {
-        _showSnackBar(
-          context,
-          'Falha ao enviar mensagem. Verifique a tabela messages.',
-          isError: true,
-        );
+        _showSnackBar(context, 'Falha ao enviar mensagem: $e', isError: true);
       }
+    } finally {
+      _isSending = false;
+      if (mounted) setState(() {});
+      messageController.clear();
+      _trackUserStatus(typing: false);
+      _scrollToBottom();
     }
   }
 
@@ -261,6 +292,75 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
+  Future<void> _startEditing(
+    String messageId,
+    String currentText,
+    String? createdAtStr,
+  ) async {
+    try {
+      if (createdAtStr != null) {
+        final created = DateTime.tryParse(createdAtStr);
+        if (created != null) {
+          final diff = DateTime.now().difference(created);
+          if (diff > const Duration(minutes: 15)) {
+            if (mounted)
+              _showSnackBar(
+                context,
+                'Tempo de edição expirado.',
+                isError: true,
+              );
+            return;
+          }
+        }
+      }
+
+      _editingMessageId = messageId;
+      messageController.text = currentText;
+      if (mounted) {
+        setState(() {});
+        FocusScope.of(context).requestFocus(FocusNode());
+        _showSnackBar(
+          context,
+          'Modo edição ativado. Faça suas alterações e envie.',
+        );
+      }
+    } catch (e) {
+      debugPrint('startEditing error: $e');
+    }
+  }
+
+  Future<void> _deleteMessage(String messageId) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Confirmar'),
+        content: const Text('Deseja apagar esta mensagem?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Apagar'),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true) return;
+
+    try {
+      await _chatService.deleteMessage(messageId: messageId);
+      if (mounted) {
+        _showSnackBar(context, 'Mensagem apagada.');
+      }
+    } catch (e) {
+      debugPrint('delete message error: $e');
+      if (mounted) _showSnackBar(context, 'Falha ao apagar: $e', isError: true);
+    }
+  }
+
   // Reactions cache
   final Map<String, Map<String, int>> _messageReactions = {};
   final Map<String, StreamSubscription> _reactionSubs = {};
@@ -424,17 +524,13 @@ class _ChatPageState extends State<ChatPage> {
             child: StreamBuilder<List<Map<String, dynamic>>>(
               stream: supabase
                   .from('messages')
-                  .select(
-                    'id, content_text, created_at, sender_id, profiles!inner(full_name)',
-                  )
-                  // Filtra apenas mensagens desta conversa (usa param ou fallback)
+                  .stream(primaryKey: ['id'])
                   .eq(
                     'conversation_id',
                     widget.conversationId ?? _kDefaultConversationId,
                   )
                   .order('created_at', ascending: true)
-                  .limit(500)
-                  .asStream(),
+                  .map((data) => List<Map<String, dynamic>>.from(data as List)),
               builder: (_, snapshot) {
                 if (snapshot.hasError) {
                   // Exibe erro do Supabase (ex: RLS, coluna faltando)
@@ -533,16 +629,84 @@ class _ChatPageState extends State<ChatPage> {
                                     borderRadius: BorderRadius.circular(16),
                                   ),
                                   child: GestureDetector(
-                                    onLongPress: () {
-                                      showModalBottomSheet(
-                                        context: context,
-                                        builder: (_) => MessageReactions(
-                                          onReact: (r) {
-                                            Navigator.pop(context);
-                                            _onReact(msgId, r);
+                                    onLongPress: () async {
+                                      if (mine) {
+                                        showModalBottomSheet(
+                                          context: context,
+                                          builder: (ctx) {
+                                            final createdAt = msg['created_at']
+                                                ?.toString();
+                                            return SafeArea(
+                                              child: Column(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  ListTile(
+                                                    leading: const Icon(
+                                                      Icons.emoji_emotions,
+                                                    ),
+                                                    title: const Text('Reagir'),
+                                                    onTap: () {
+                                                      Navigator.pop(ctx);
+                                                      showModalBottomSheet(
+                                                        context: context,
+                                                        builder: (_) =>
+                                                            MessageReactions(
+                                                              onReact: (r) {
+                                                                Navigator.pop(
+                                                                  context,
+                                                                );
+                                                                _onReact(
+                                                                  msgId,
+                                                                  r,
+                                                                );
+                                                              },
+                                                            ),
+                                                      );
+                                                    },
+                                                  ),
+                                                  ListTile(
+                                                    leading: const Icon(
+                                                      Icons.edit,
+                                                    ),
+                                                    title: const Text('Editar'),
+                                                    onTap: () {
+                                                      Navigator.pop(ctx);
+                                                      _startEditing(
+                                                        msgId,
+                                                        msg['content_text'] ??
+                                                            '',
+                                                        createdAt,
+                                                      );
+                                                    },
+                                                  ),
+                                                  ListTile(
+                                                    leading: const Icon(
+                                                      Icons.delete,
+                                                    ),
+                                                    title: const Text('Apagar'),
+                                                    onTap: () async {
+                                                      Navigator.pop(ctx);
+                                                      await _deleteMessage(
+                                                        msgId,
+                                                      );
+                                                    },
+                                                  ),
+                                                ],
+                                              ),
+                                            );
                                           },
-                                        ),
-                                      );
+                                        );
+                                      } else {
+                                        showModalBottomSheet(
+                                          context: context,
+                                          builder: (_) => MessageReactions(
+                                            onReact: (r) {
+                                              Navigator.pop(context);
+                                              _onReact(msgId, r);
+                                            },
+                                          ),
+                                        );
+                                      }
                                     },
                                     child: Text(
                                       msg['content_text'],
@@ -688,14 +852,23 @@ class _ChatPageState extends State<ChatPage> {
                 ),
                 const SizedBox(width: 8),
                 GestureDetector(
-                  onTap: _sendMessage,
+                  onTap: _isSending ? null : _sendMessage,
                   child: Container(
                     padding: const EdgeInsets.all(14),
                     decoration: const BoxDecoration(
                       color: Colors.blue,
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.send, color: Colors.white),
+                    child: _isSending
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.send, color: Colors.white),
                   ),
                 ),
               ],

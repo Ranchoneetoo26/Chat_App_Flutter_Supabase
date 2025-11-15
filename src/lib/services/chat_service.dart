@@ -27,6 +27,25 @@ class ChatService {
     });
   }
 
+  /// Atualiza o conteúdo de uma mensagem (somente texto).
+  Future<void> updateMessage({
+    required String messageId,
+    required String newText,
+  }) async {
+    await _client
+        .from('messages')
+        .update({
+          'content_text': newText,
+          'updated_at': DateTime.now().toIso8601String(),
+        })
+        .eq('id', messageId);
+  }
+
+  /// Remove uma mensagem (apagar)
+  Future<void> deleteMessage({required String messageId}) async {
+    await _client.from('messages').delete().eq('id', messageId);
+  }
+
   /// Adiciona ou atualiza a reação de um usuário para uma mensagem (toggle semantics).
   Future<void> addReaction({
     required String messageId,
@@ -85,18 +104,22 @@ class ChatService {
   /// Faz upload de um anexo para o bucket `attachments` e retorna a URL pública.
   /// Aceita os bytes do arquivo e o nome original para compor o caminho.
   Future<String> uploadAttachment(Uint8List bytes, String filename) async {
+    const maxBytes = 20 * 1024 * 1024; // 20MB
+    if (bytes.length > maxBytes) {
+      throw Exception('Arquivo maior que 20MB.');
+    }
+
     final bucket = 'attachments';
     final key = 'uploads/${DateTime.now().millisecondsSinceEpoch}_$filename';
 
     try {
       // Tenta usar uploadBinary (disponível nas versões recentes do SDK).
       final storage = _client.storage.from(bucket);
-      // uploadBinary pode existir ou não dependendo da versão; usamos try/catch.
       try {
         await storage.uploadBinary(key, bytes);
       } catch (e) {
-        // Fallback: escrevemos em disco temporário e usamos upload
-        // (apenas para plataformas que suportam File).
+        // Se uploadBinary não estiver disponível ou falhar, logamos e rethrow
+        debugPrint('uploadBinary failed: $e');
         rethrow;
       }
 

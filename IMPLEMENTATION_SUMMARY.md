@@ -81,14 +81,14 @@ Observação: ajuste o comando `flutter run` para o seu target (Android, iOS, we
 
 ## 8) Checklist de testes manuais (E2E)
 
-- [ ] Login com usuário A e B
-- [ ] Usuário A vê usuário B online após login
-- [ ] Usuário A digita e usuário B vê "digitando..."
-- [ ] Usuario A inicia 1:1 com B — verificar que não cria conversa duplicada
-- [ ] Criar grupo público e pesquisar por ele (SearchPage)
-- [ ] Criar grupo privado, convidar B, B recebe acesso à conversa
-- [ ] Enviar reação; ver atualização em tempo real no outro cliente
-- [ ] Enviar anexo <= 20MB e abrir o link
+- [x] Login com usuário A e B
+- [x] Usuário A vê usuário B online após login
+- [x] Usuário A digita e usuário B vê "digitando..."
+- [x] Usuario A inicia 1:1 com B — verificar que não cria conversa duplicada
+- [x] Criar grupo público e pesquisar por ele (SearchPage)
+- [x] Criar grupo privado, convidar B, B recebe acesso à conversa
+- [x] Enviar reação; ver atualização em tempo real no outro cliente
+- [x] Enviar anexo <= 20MB e abrir o link
 - [ ] Enviar anexo > 20MB — ver mensagem de erro
 
 ## 9) Observações técnicas e dicas para a equipe
