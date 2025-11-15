@@ -2,7 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../main.dart'; // Para usar 'supabase'
+// import removed: use Supabase.instance.client directly
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -13,7 +13,7 @@ class ProfilePage extends StatefulWidget {
 
 class _ProfilePageState extends State<ProfilePage> {
   // Removido 'final' para permitir inicialização no initState
-  late SupabaseClient supabase; 
+  late SupabaseClient supabase;
   late String currentUserId; // Removido 'final'
 
   // Controllers para editar o nome
@@ -31,7 +31,7 @@ class _ProfilePageState extends State<ProfilePage> {
     // 1. Inicializa o membro 'supabase' e 'currentUserId' aqui.
     supabase = Supabase.instance.client;
     currentUserId = supabase.auth.currentUser!.id;
-    
+
     // Agora que o ID está inicializado, carregamos o perfil
     _loadProfile();
   }
@@ -60,6 +60,7 @@ class _ProfilePageState extends State<ProfilePage> {
         });
       }
     } catch (e) {
+      debugPrint('loadProfile error: $e');
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -72,24 +73,39 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<void> _updateProfile() async {
     // 2. Atualizar o nome completo e username no Supabase Postgres
     if (_usernameController.text.isEmpty || _fullNameController.text.isEmpty) {
-      _showSnackBar(context, 'Nome de usuário e nome completo são obrigatórios.', isError: true);
+      _showSnackBar(
+        context,
+        'Nome de usuário e nome completo são obrigatórios.',
+        isError: true,
+      );
       return;
     }
 
     try {
-      await supabase.from('profiles').update({
-        'username': _usernameController.text.trim(),
-        'full_name': _fullNameController.text.trim(),
-      }).eq('id', currentUserId);
+      await supabase
+          .from('profiles')
+          .update({
+            'username': _usernameController.text.trim(),
+            'full_name': _fullNameController.text.trim(),
+          })
+          .eq('id', currentUserId);
 
+      if (!mounted) return;
       _showSnackBar(context, 'Perfil atualizado com sucesso!', isError: false);
     } catch (e) {
-      _showSnackBar(context, 'Erro ao atualizar perfil: $e', isError: true);
+      debugPrint('updateProfile error: $e');
+      if (mounted) {
+        _showSnackBar(context, 'Erro ao atualizar perfil: $e', isError: true);
+      }
     }
   }
-  
+
   // Função auxiliar de SnackBar (simplificada)
-  void _showSnackBar(BuildContext context, String message, {bool isError = false}) {
+  void _showSnackBar(
+    BuildContext context,
+    String message, {
+    bool isError = false,
+  }) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
@@ -101,9 +117,7 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Meu Perfil'),
-      ),
+      appBar: AppBar(title: const Text('Meu Perfil')),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
@@ -118,14 +132,18 @@ class _ProfilePageState extends State<ProfilePage> {
                   // 4. Campo para NOME DE USUÁRIO
                   TextFormField(
                     controller: _usernameController,
-                    decoration: const InputDecoration(labelText: 'Nome de Usuário'),
+                    decoration: const InputDecoration(
+                      labelText: 'Nome de Usuário',
+                    ),
                   ),
                   const SizedBox(height: 16),
 
                   // 5. Campo para NOME COMPLETO
                   TextFormField(
                     controller: _fullNameController,
-                    decoration: const InputDecoration(labelText: 'Nome Completo'),
+                    decoration: const InputDecoration(
+                      labelText: 'Nome Completo',
+                    ),
                   ),
                   const SizedBox(height: 30),
 
@@ -143,8 +161,9 @@ class _ProfilePageState extends State<ProfilePage> {
   // Widget para Imagem de Perfil (futuramente com lógica de upload)
   Widget _buildProfileImage() {
     final hasImage = _profileImageUrl.isNotEmpty;
-    final initials = (_initialUsername.isNotEmpty ? _initialUsername[0] : '?').toUpperCase();
-    
+    final initials = (_initialUsername.isNotEmpty ? _initialUsername[0] : '?')
+        .toUpperCase();
+
     return Stack(
       alignment: Alignment.center,
       children: [
@@ -172,7 +191,10 @@ class _ProfilePageState extends State<ProfilePage> {
               icon: const Icon(Icons.edit, color: Colors.white, size: 20),
               onPressed: () {
                 // TODO: Implementar upload de imagem (Próxima tarefa)
-                _showSnackBar(context, 'Funcionalidade de upload será implementada a seguir.');
+                _showSnackBar(
+                  context,
+                  'Funcionalidade de upload será implementada a seguir.',
+                );
               },
             ),
           ),

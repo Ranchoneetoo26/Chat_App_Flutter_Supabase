@@ -40,16 +40,20 @@ class _MainAppState extends State<MainApp> {
   // presence & auth state
   late RealtimeChannel _presenceChannel;
   String? _currentUserId;
-  Set<String> _onlineUsers = {};
+  // presence user set removed from main (managed per-chat)
   final bool _isTyping = false;
   Timer? _typingTimer;
   final bool _isStatusHidden = false;
   final Map<String, Map<String, String>> _userNames = {};
-  
+
   // Variáveis removidas para limpar warnings: _typingUserId, _userSearchResults, _groupSearchResults
 
   // 🚨 CORREÇÃO: Função _showSnackBar agora aceita um BuildContext explícito
-  void _showSnackBar(BuildContext context, String message, {bool isError = false}) {
+  void _showSnackBar(
+    BuildContext context,
+    String message, {
+    bool isError = false,
+  }) {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -84,7 +88,7 @@ class _MainAppState extends State<MainApp> {
         _removePresenceSubscription();
         _currentUserId = null;
         setState(() {
-          _onlineUsers = {};
+          // cleared auth state
         });
       }
     });
@@ -99,7 +103,6 @@ class _MainAppState extends State<MainApp> {
     presence.onSync(() {
       final dynamic rawState = presence.state;
       final onlineUsers = <String>{};
-      String? typingUser;
 
       if (rawState is Map) {
         rawState.forEach((key, value) {
@@ -107,13 +110,9 @@ class _MainAppState extends State<MainApp> {
           final presences = (value is List) ? value : [value];
           for (final p in presences) {
             bool hidden = false;
-            String? status;
 
             if (p is Map) {
               hidden = (p['hide_status'] as bool?) ?? false;
-              status = p['status']?.toString();
-            } else {
-              status = p?.toString();
             }
 
             _loadUserName(userId);
@@ -128,8 +127,7 @@ class _MainAppState extends State<MainApp> {
       }
 
       setState(() {
-        _onlineUsers = onlineUsers;
-        // _typingUserId = typingUser; // Removido
+        // presence updated (state kept local)
       });
     });
 
@@ -155,42 +153,59 @@ class _MainAppState extends State<MainApp> {
         'hide_status': _isStatusHidden,
         'updated_at': DateTime.now().toIso8601String(),
       });
-    } catch (e) {}
+    } catch (e) {
+      debugPrint('trackUserStatus error: $e');
+    }
   }
 
   Future<void> _removePresenceSubscription() async {
     try {
       await _presenceChannel.presence.untrack();
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('removePresenceSubscription error: $e');
+    }
 
     try {
       await supabase.removeChannel(_presenceChannel);
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('removeChannel error: $e');
+    }
   }
 
   // 🚨 CORREÇÃO: Função _cadastrarUsuario agora aceita o BuildContext
-  void _cadastrarUsuario(BuildContext context) async {
+  Future<void> _cadastrarUsuario() async {
     final email = emailController.text.trim();
     final pass = passwordController.text.trim();
 
     try {
       await supabase.auth.signUp(email: email, password: pass);
+      if (!mounted) return;
       _showSnackBar(
         context,
         "✅ Cadastro iniciado! Verifique seu email para confirmação.",
         isError: false,
       );
     } on AuthException catch (e) {
-      _showSnackBar(context, "Falha no Cadastro: ${e.message}", isError: true);
+      if (mounted) {
+        _showSnackBar(
+          context,
+          "Falha no Cadastro: ${e.message}",
+          isError: true,
+        );
+      }
     } catch (e) {
-      _showSnackBar(
-        context,
-        "Erro inesperado. Verifique sua conexão e chaves.",
-        isError: true,
-      );
+      if (mounted) {
+        _showSnackBar(
+          context,
+          "Erro inesperado. Verifique sua conexão e chaves.",
+          isError: true,
+        );
+      } else {
+        debugPrint('signup error: $e');
+      }
     }
   }
-  
+
   // Funções de Busca e Auxiliares Removidas, pois não estavam sendo usadas no Build
   // (Ex.: _searchUsers, _searchGroups, _runSearch) para limpar warnings.
 
@@ -210,19 +225,9 @@ class _MainAppState extends State<MainApp> {
         };
         if (mounted) setState(() {});
       }
-    } catch (e) {}
-  }
-
-  String _displayName(String userId) {
-    final info = _userNames[userId];
-    if (info == null) return userId;
-    final fullName = info['full_name']?.toString().trim();
-    final username = info['username']?.toString().trim();
-
-    if (fullName != null && fullName.isNotEmpty) return fullName;
-    if (username != null && username.isNotEmpty) return username;
-
-    return userId;
+    } catch (e) {
+      debugPrint('loadUserName error: $e');
+    }
   }
 
   @override
@@ -253,7 +258,7 @@ class _MainAppState extends State<MainApp> {
               elevation: 2,
             ),
           ),
-          home: loggedIn ? const ChatPage() : _buildLoginScreen(),
+          home: loggedIn ? ChatPage() : _buildLoginScreen(),
         );
       },
     );
@@ -269,14 +274,14 @@ class _MainAppState extends State<MainApp> {
             constraints: const BoxConstraints(maxWidth: 520),
             // O Builder garante que o contexto (innerContext) aqui está ABAIXO do Scaffold
             child: Builder(
-              builder: (innerContext) { 
+              builder: (innerContext) {
                 return Form(
                   key: _formKey,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const SizedBox(height: 32),
-                      
+
                       // CAMPO DE EMAIL COM VALIDADOR
                       CustomInput(
                         controller: emailController,
@@ -325,19 +330,30 @@ class _MainAppState extends State<MainApp> {
                                 email: emailController.text.trim(),
                                 password: passwordController.text.trim(),
                               );
-                              _showSnackBar(innerContext, "Login bem-sucedido!", isError: false);
+                              if (!mounted) return;
+                              _showSnackBar(
+                                context,
+                                "Login bem-sucedido!",
+                                isError: false,
+                              );
                             } on AuthException catch (e) {
-                              _showSnackBar(
-                                innerContext,
-                                "Falha no Login: ${e.message}",
-                                isError: true,
-                              );
+                              if (mounted) {
+                                _showSnackBar(
+                                  context,
+                                  "Falha no Login: ${e.message}",
+                                  isError: true,
+                                );
+                              }
                             } catch (e) {
-                              _showSnackBar(
-                                innerContext,
-                                "Erro inesperado. Verifique sua conexão.",
-                                isError: true,
-                              );
+                              if (mounted) {
+                                _showSnackBar(
+                                  context,
+                                  "Erro inesperado. Verifique sua conexão.",
+                                  isError: true,
+                                );
+                              } else {
+                                debugPrint('login error: $e');
+                              }
                             }
                           }
                         },
@@ -350,7 +366,7 @@ class _MainAppState extends State<MainApp> {
                         buttonText: "Cadastrar",
                         onPressed: () {
                           if (_formKey.currentState!.validate()) {
-                            _cadastrarUsuario(innerContext);
+                            _cadastrarUsuario();
                           }
                         },
                       ),
@@ -400,7 +416,7 @@ class _MessageReactionsState extends State<MessageReactions> {
             padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(
               color: isSelected
-                  ? Colors.blue.withOpacity(0.2)
+                  ? Colors.blue.withAlpha(51)
                   : Colors.transparent,
               borderRadius: BorderRadius.circular(8),
             ),
