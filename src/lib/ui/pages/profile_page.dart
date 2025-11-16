@@ -42,17 +42,16 @@ class _ProfilePageState extends State<ProfilePage> {
     // (A tabela deve ser 'profiles' conforme o escopo do projeto)
     try {
       final response = await supabase
-          .from('profiles')
-          .select('username, full_name, avatar_url')
-          .eq('id', currentUserId)
-          .single();
+      .from('profiles')
+      .select('username, full_name, avatar_url')
+      .eq('id', currentUserId)
+      .single();
 
-      _initialUsername = response['username'] as String;
-      _initialFullName = response['full_name'] as String;
-      _profileImageUrl = response['avatar_url'] as String;
+  _initialUsername = response['username'] ?? '';
+  _initialFullName = response['full_name'] ?? '';
+  _profileImageUrl = response['avatar_url'] ?? '';
 
-      _usernameController.text = _initialUsername;
-      _fullNameController.text = _initialFullName;
+  _usernameController.text = _initialUsername;
 
       if (mounted) {
         setState(() {
