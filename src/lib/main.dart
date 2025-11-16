@@ -5,6 +5,7 @@ import 'package:app/ui/pages/chat_page.dart';
 import 'package:app/ui/widgets/custom_button.dart';
 import 'package:app/ui/widgets/custom_input.dart';
 import 'package:app/ui/widgets/custom_text_button.dart';
+import 'package:app/ui/pages/conversations_page.dart';
 
 final supabase = Supabase.instance.client;
 const String kPresenceChannelName = 'online_users';
@@ -147,7 +148,7 @@ class _MainAppState extends State<MainApp> {
         return;
       }
 
-      await _presenceChannel.presence.track({
+      await _presenceChannel.track({
         'user_id': _currentUserId,
         'status': _isTyping ? 'typing' : 'online',
         'hide_status': _isStatusHidden,
@@ -173,7 +174,7 @@ class _MainAppState extends State<MainApp> {
   }
 
   // 🚨 CORREÇÃO: Função _cadastrarUsuario agora aceita o BuildContext
-  Future<void> _cadastrarUsuario() async {
+  Future<void> _cadastrarUsuario(BuildContext context) async {
     final email = emailController.text.trim();
     final pass = passwordController.text.trim();
 
@@ -258,7 +259,7 @@ class _MainAppState extends State<MainApp> {
               elevation: 2,
             ),
           ),
-          home: loggedIn ? ChatPage() : _buildLoginScreen(),
+          home: loggedIn ? const ConversationsPage() : _buildLoginScreen(),
         );
       },
     );
@@ -332,14 +333,14 @@ class _MainAppState extends State<MainApp> {
                               );
                               if (!mounted) return;
                               _showSnackBar(
-                                context,
+                                innerContext, //
                                 "Login bem-sucedido!",
                                 isError: false,
                               );
                             } on AuthException catch (e) {
                               if (mounted) {
                                 _showSnackBar(
-                                  context,
+                                  innerContext, //
                                   "Falha no Login: ${e.message}",
                                   isError: true,
                                 );
@@ -347,7 +348,7 @@ class _MainAppState extends State<MainApp> {
                             } catch (e) {
                               if (mounted) {
                                 _showSnackBar(
-                                  context,
+                                  innerContext, //
                                   "Erro inesperado. Verifique sua conexão.",
                                   isError: true,
                                 );
@@ -366,7 +367,7 @@ class _MainAppState extends State<MainApp> {
                         buttonText: "Cadastrar",
                         onPressed: () {
                           if (_formKey.currentState!.validate()) {
-                            _cadastrarUsuario();
+                            _cadastrarUsuario(innerContext); //
                           }
                         },
                       ),
