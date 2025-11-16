@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'chat_page.dart';
-import 'profile_page.dart';
+import 'profile_page.dart'; // Importação do Perfil
 
 class ConversationsPage extends StatefulWidget {
   const ConversationsPage({super.key});
@@ -15,7 +15,7 @@ class _ConversationsPageState extends State<ConversationsPage> {
   List<Map<String, dynamic>> _convs = [];
   bool _loading = false;
   final sup = Supabase.instance.client;
-  // Subscriptions usando streams (mais compatível com a versão do SDK)
+  // Subscriptions usando streams
   StreamSubscription<List<Map<String, dynamic>>>? _membersSub;
   StreamSubscription<List<Map<String, dynamic>>>? _convsSub;
 
@@ -44,10 +44,10 @@ class _ConversationsPageState extends State<ConversationsPage> {
   void _setupRealtime() {
     final currentUser = sup.auth.currentUser;
     if (currentUser == null) return;
-    // Usa stream() para receber updates em tempo real e recarregar a lista
     try {
+      // ##### CORREÇÃO: Usando a tabela 'participants' #####
       _membersSub = sup
-          .from('conversation_members')
+          .from('participants') // 
           .stream(primaryKey: ['id'])
           .eq('user_id', currentUser.id)
           .listen(
@@ -68,7 +68,10 @@ class _ConversationsPageState extends State<ConversationsPage> {
   }
 
   Future<void> _loadConversations() async {
-    setState(() => _loading = true);
+    if (mounted && _convs.isEmpty) {
+      setState(() => _loading = true);
+    }
+
     try {
       final currentUser = sup.auth.currentUser;
       if (currentUser == null) {
@@ -77,9 +80,9 @@ class _ConversationsPageState extends State<ConversationsPage> {
         return;
       }
 
-      // fetch conversation_ids where current user is participant
+      // ##### CORREÇÃO: Usando a tabela 'participants' #####
       final members = await sup
-          .from('conversation_members')
+          .from('participants') // 
           .select('conversation_id')
           .eq('user_id', currentUser.id);
 
@@ -87,6 +90,7 @@ class _ConversationsPageState extends State<ConversationsPage> {
           .map((e) => e['conversation_id'])
           .where((e) => e != null)
           .toList();
+
       if (ids.isEmpty) {
         _convs = [];
         setState(() => _loading = false);
@@ -94,18 +98,31 @@ class _ConversationsPageState extends State<ConversationsPage> {
       }
 
       final idList = ids.map((e) => e.toString()).toList();
-      final inExpr = '("' + idList.join('","') + '")';
+
+      // ##### CORREÇÃO: Usando a coluna 'group_name' #####
       final res = await sup
           .from('conversations')
           .select(
-            'id, name, is_group, is_public, created_at, updated_at, created_by',
+            'id, group_name, is_group, is_public, created_at, updated_at, created_by', // 
           )
-          .filter('id', 'in', inExpr)
+          .filter('id', 'in', idList)
           .order('updated_at', ascending: false);
 
       _convs = List<Map<String, dynamic>>.from(res as List);
-    } catch (_) {}
-    setState(() => _loading = false);
+
+    } catch (e) {
+      debugPrint('Erro ao carregar conversas: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Erro ao carregar conversas: $e'),
+          backgroundColor: Colors.red,
+        ));
+      }
+    }
+
+    if (mounted) {
+      setState(() => _loading = false);
+    }
   }
 
   void _openConversation(dynamic convId) {
@@ -121,6 +138,7 @@ class _ConversationsPageState extends State<ConversationsPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Conversas')),
+
       drawer: Drawer(
         child: ListView(
           padding: EdgeInsets.zero,
@@ -148,12 +166,12 @@ class _ConversationsPageState extends State<ConversationsPage> {
               onTap: () async {
                 Navigator.pop(context); // Fecha o Drawer
                 await sup.auth.signOut();
-                // O main.dart cuida do redirecionamento
               },
             ),
           ],
         ),
       ),
+
       body: RefreshIndicator(
         onRefresh: _loadConversations,
         child: _loading
@@ -162,9 +180,11 @@ class _ConversationsPageState extends State<ConversationsPage> {
                 itemCount: _convs.length,
                 itemBuilder: (_, i) {
                   final c = _convs[i];
+                  // ##### CORREÇÃO: Usando a coluna 'group_name' #####
                   final title = (c['is_group'] == true)
-                      ? (c['name'] ?? 'Grupo')
-                      : (c['name'] ?? 'Conversa');
+                      ? (c['group_name'] ?? 'Grupo') // 
+                      : (c['group_name'] ?? 'Conversa'); // 
+
                   return ListTile(
                     leading: const Icon(Icons.chat_bubble_outline),
                     title: Text(title),
@@ -274,11 +294,11 @@ class _ConversationsPageState extends State<ConversationsPage> {
                         return;
                       }
 
-                      // create group (public/private)
+                      // ##### CORREÇÃO: Usando 'group_name' #####
                       final created = await sup
                           .from('conversations')
                           .insert({
-                            'name': nameController.text.trim(),
+                            'group_name': nameController.text.trim(), // 
                             'is_group': true,
                             'is_public': isPublic,
                             'created_by': currentUser.id,
@@ -289,14 +309,16 @@ class _ConversationsPageState extends State<ConversationsPage> {
 
                       if (created != null) {
                         final convId = created['id'];
-                        await sup.from('conversation_members').insert([
+                        // ##### CORREÇÃO: Usando 'participants' #####
+                        await sup.from('participants').insert([ // 
                           {
                             'conversation_id': convId,
                             'user_id': currentUser.id,
                           },
                         ]);
                         if (otherId != null) {
-                          await sup.from('conversation_members').insert([
+                          // ##### CORREÇÃO: Usando 'participants' #####
+                          await sup.from('participants').insert([ // 
                             {'conversation_id': convId, 'user_id': otherId},
                           ]);
                         }
@@ -318,15 +340,17 @@ class _ConversationsPageState extends State<ConversationsPage> {
 
   Future<String> _findOrCreatePrivateConversation(String a, String b) async {
     try {
-      // get conversation ids for each user
+      // ##### CORREÇÃO: Usando 'participants' #####
       final resA = await sup
-          .from('conversation_members')
+          .from('participants') // 
           .select('conversation_id')
           .eq('user_id', a);
       final resB = await sup
-          .from('conversation_members')
+          .from('participants') // 
           .select('conversation_id')
           .eq('user_id', b);
+      // ##### FIM DA CORREÇÃO #####
+
       final idsA = (resA as List)
           .map((e) => e['conversation_id']?.toString())
           .where((e) => e != null)
@@ -339,12 +363,13 @@ class _ConversationsPageState extends State<ConversationsPage> {
       if (common.isNotEmpty) {
         // verify any common conversation is not a group
         final idList = common.toList();
-        final inExpr = '("' + idList.join('","') + '")';
+        
         final convs = await sup
             .from('conversations')
             .select('id')
-            .filter('id', 'in', inExpr)
+            .filter('id', 'in', idList)
             .eq('is_group', false);
+
         final convsList = convs as List? ?? <dynamic>[];
         if (convsList.isNotEmpty) {
           return convsList.first['id'].toString();
@@ -365,7 +390,9 @@ class _ConversationsPageState extends State<ConversationsPage> {
         .maybeSingle();
     final convId = created == null ? null : created['id'];
     if (convId == null) throw Exception('Failed to create conversation');
-    await sup.from('conversation_members').insert([
+    
+    // ##### CORREÇÃO: Usando 'participants' #####
+    await sup.from('participants').insert([ // 
       {'conversation_id': convId, 'user_id': a},
       {'conversation_id': convId, 'user_id': b},
     ]);

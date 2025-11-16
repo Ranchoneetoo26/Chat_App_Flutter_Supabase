@@ -13,11 +13,12 @@ class Message {
     required this.createdAt,
   });
 
+
   factory Message.fromJson(Map<String, dynamic> json) => Message(
         id: json['id'],
-        chatId: json['chat_id'],
+        chatId: json['conversation_id'], 
         senderId: json['sender_id'],
-        content: json['content'],
+        content: json['content_text'], 
         createdAt: DateTime.parse(json['created_at']),
       );
 }
