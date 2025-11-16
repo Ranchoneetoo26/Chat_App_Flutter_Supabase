@@ -128,6 +128,14 @@ class ChatService {
       return url;
     } catch (e) {
       debugPrint('uploadAttachment error: $e');
+      final emsg = e.toString();
+      if (emsg.contains('Bucket not found') ||
+          emsg.toLowerCase().contains('bucket not found') ||
+          (emsg.contains('404') && emsg.toLowerCase().contains('bucket'))) {
+        throw Exception(
+          'Bucket "attachments" não encontrado no Supabase Storage. Verifique se o bucket existe e as permissões.',
+        );
+      }
       rethrow;
     }
   }
