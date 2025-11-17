@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-// IMPORT CORRIGIDO: Aponta para a raiz onde está o main.dart e o themeNotifier
-import '../../../main.dart';
+// IMPORT CORRIGIDO (caminho correto)
+import '../../main.dart';
 import 'chat_page.dart';
-import 'profile_page.dart';
+import 'profile_page.dart'; // Importação do Perfil
 
 class ConversationsPage extends StatefulWidget {
   const ConversationsPage({super.key});
@@ -49,7 +49,7 @@ class _ConversationsPageState extends State<ConversationsPage> {
     if (currentUser == null) return;
     try {
       _membersSub = sup
-          .from('conversation_members')
+          .from('participants') // Corrigido
           .stream(primaryKey: ['id'])
           .eq('user_id', currentUser.id)
           .listen(
@@ -70,8 +70,10 @@ class _ConversationsPageState extends State<ConversationsPage> {
   }
 
   Future<void> _loadConversations() async {
-    if (!mounted) return;
-    setState(() => _loading = true);
+    if (mounted && _convs.isEmpty) {
+      setState(() => _loading = true);
+    }
+
     try {
       final currentUser = sup.auth.currentUser;
       if (currentUser == null) {
@@ -81,7 +83,7 @@ class _ConversationsPageState extends State<ConversationsPage> {
       }
 
       final members = await sup
-          .from('conversation_members')
+          .from('participants') // Corrigido
           .select('conversation_id')
           .eq('user_id', currentUser.id);
 
@@ -97,20 +99,34 @@ class _ConversationsPageState extends State<ConversationsPage> {
       }
 
       final idList = ids.map((e) => e.toString()).toList();
-      // Filtro corrigido para funcionar com versões mais novas do Supabase
       final res = await sup
           .from('conversations')
           .select(
-            'id, name, is_group, is_public, created_at, updated_at, created_by',
+            'id, group_name, is_group, is_public, created_at, updated_at, created_by', // Corrigido
           )
-          .filter('id', 'in', '(${idList.join(',')})')
+          .filter('id', 'in', idList) // Corrigido
           .order('updated_at', ascending: false);
 
       _convs = List<Map<String, dynamic>>.from(res as List);
+
     } catch (e) {
-      debugPrint("Erro ao carregar conversas: $e");
+      debugPrint('Erro ao carregar conversas: $e');
+      if (mounted) {
+        // Mostra o erro real
+        String errorMessage = 'Erro ao carregar: $e';
+        if (e is PostgrestException) {
+          errorMessage = 'Erro do Banco: ${e.message}';
+        }
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(errorMessage),
+          backgroundColor: Colors.red,
+        ));
+      }
     }
-    if (mounted) setState(() => _loading = false);
+
+    if (mounted) {
+      setState(() => _loading = false);
+    }
   }
 
   void _openConversation(dynamic convId) {
@@ -122,7 +138,7 @@ class _ConversationsPageState extends State<ConversationsPage> {
     );
   }
 
-  // --- Lógica Completa de Criar Conversa ---
+  // --- Lógica Completa de Criar Conversa (CORRIGIDA) ---
   void _showCreateDialog() {
     final currentUser = sup.auth.currentUser;
     if (currentUser == null) return;
@@ -203,79 +219,101 @@ class _ConversationsPageState extends State<ConversationsPage> {
                           if (query.isEmpty && !isGroup)
                             return; // Se não for grupo, precisa buscar alguém
 
-                          // Lógica de busca
-                          Map<String, dynamic>? otherUser;
-                          if (query.isNotEmpty) {
-                            final res = await sup
-                                .from('profiles')
-                                .select('id, email, username')
-                                .or('email.eq.$query,username.eq.$query')
-                                .maybeSingle();
+                          // Adiciona try/catch para mostrar erros
+                          try {
+                            Map<String, dynamic>? otherUser;
+                            if (query.isNotEmpty) {
+                              final res = await sup
+                                  .from('profiles')
+                                  .select('id, email, username')
+                                  .or('email.eq."$query",username.eq."$query"') // Corrigido
+                                  .maybeSingle();
 
-                            if (res == null && !isGroup) {
-                              if (!mounted) return;
-                              ScaffoldMessenger.of(ctx).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Usuário não encontrado'),
-                                ),
+                              if (res == null && !isGroup) {
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(ctx).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Usuário não encontrado'),
+                                    backgroundColor: Colors.red,
+                                  ),
+                                );
+                                return;
+                              }
+                              otherUser = res;
+                            }
+
+                            final otherId = otherUser != null
+                                ? otherUser['id']
+                                : null;
+
+                            // 1. Conversa Privada (1:1)
+                            if (!isGroup) {
+                              if (otherId == null) return;
+                              if (otherId == currentUser.id) {
+                                ScaffoldMessenger.of(ctx).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Você não pode criar uma conversa com você mesmo.'),
+                                    backgroundColor: Colors.red,
+                                  ),
+                                );
+                                return;
+                              }
+
+                              final convId =
+                                  await _findOrCreatePrivateConversation(
+                                currentUser.id,
+                                otherId,
                               );
+                              if (!mounted) return;
+                              Navigator.pop(ctx); // Fecha modal
+                              _openConversation(convId);
                               return;
                             }
-                            otherUser = res;
-                          }
 
-                          final otherId = otherUser != null
-                              ? otherUser['id']
-                              : null;
+                            // 2. Criar Grupo
+                            final created = await sup
+                                .from('conversations')
+                                .insert({
+                                  'group_name': nameController.text.trim().isEmpty // Corrigido
+                                      ? 'Novo Grupo'
+                                      : nameController.text.trim(),
+                                  'is_group': true,
+                                  'is_public': isPublic,
+                                  'created_by': currentUser.id,
+                                  'created_at': DateTime.now().toIso8601String(),
+                                })
+                                .select()
+                                .maybeSingle();
 
-                          // 1. Conversa Privada (1:1)
-                          if (!isGroup) {
-                            if (otherId == null) return;
-                            // Verifica se já existe conversa
-                            final convId =
-                                await _findOrCreatePrivateConversation(
-                                  currentUser.id,
-                                  otherId,
-                                );
-                            if (!mounted) return;
-                            Navigator.pop(ctx); // Fecha modal
-                            _openConversation(convId);
-                            return;
-                          }
-
-                          // 2. Criar Grupo
-                          final created = await sup
-                              .from('conversations')
-                              .insert({
-                                'name': nameController.text.trim().isEmpty
-                                    ? 'Novo Grupo'
-                                    : nameController.text.trim(),
-                                'is_group': true,
-                                'is_public': isPublic,
-                                'created_by': currentUser.id,
-                                'created_at': DateTime.now().toIso8601String(),
-                              })
-                              .select()
-                              .maybeSingle();
-
-                          if (created != null) {
-                            final convId = created['id'];
-                            // Adiciona o criador
-                            await sup.from('conversation_members').insert([
-                              {
-                                'conversation_id': convId,
-                                'user_id': currentUser.id,
-                              },
-                            ]);
-                            // Adiciona o outro usuário se foi buscado
-                            if (otherId != null) {
-                              await sup.from('conversation_members').insert([
-                                {'conversation_id': convId, 'user_id': otherId},
+                            if (created != null) {
+                              final convId = created['id'];
+                              await sup.from('participants').insert([ // Corrigido
+                                {
+                                  'conversation_id': convId,
+                                  'user_id': currentUser.id,
+                                },
                               ]);
+                              if (otherId != null && otherId != currentUser.id) {
+                                await sup.from('participants').insert([ // Corrigido
+                                  {'conversation_id': convId, 'user_id': otherId},
+                                ]);
+                              }
+                              if (!mounted) return;
+                              Navigator.pop(ctx);
+                              _openConversation(convId);
                             }
-                            if (!mounted) return;
-                            Navigator.pop(ctx);
-                            _openConversation(convId);
+                          } catch (e) {
+                            // Se qualquer coisa falhar, mostra o erro
+                            String errorMessage = 'Erro ao criar: $e';
+                            if (e is PostgrestException) {
+                              errorMessage = 'Erro do Banco: ${e.message}';
+                            }
+                            ScaffoldMessenger.of(ctx).showSnackBar(
+                              SnackBar(
+                                content: Text(errorMessage),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
                           }
                         },
                         child: const Text('Iniciar'),
@@ -292,16 +330,15 @@ class _ConversationsPageState extends State<ConversationsPage> {
     );
   }
 
+  // --- Lógica de Achar ou Criar (CORRIGIDA) ---
   Future<String> _findOrCreatePrivateConversation(String a, String b) async {
     try {
-      // Busca conversas do user A
       final resA = await sup
-          .from('conversation_members')
+          .from('participants') // Corrigido
           .select('conversation_id')
           .eq('user_id', a);
-      // Busca conversas do user B
       final resB = await sup
-          .from('conversation_members')
+          .from('participants') // Corrigido
           .select('conversation_id')
           .eq('user_id', b);
 
@@ -314,51 +351,56 @@ class _ConversationsPageState extends State<ConversationsPage> {
           .where((e) => e != null)
           .toSet();
 
-      // Acha a interseção (conversas em comum)
       final common = idsA.intersection(idsB);
 
       if (common.isNotEmpty) {
         final idList = common.toList();
-        // Verifica qual delas NÃO é grupo
         final convs = await sup
             .from('conversations')
             .select('id')
-            .filter('id', 'in', '(${idList.join(',')})')
+            .filter('id', 'in', idList) // Corrigido
             .eq('is_group', false);
 
         final convsList = convs as List? ?? [];
         if (convsList.isNotEmpty) {
-          return convsList.first['id'].toString();
+          return convsList.first['id'].toString(); // Retorna chat 1:1 existente
         }
       }
     } catch (e) {
       debugPrint('find conversation error: $e');
+      throw Exception('Falha ao buscar conversas existentes: $e');
     }
 
     // Se não achou, cria nova
-    final created = await sup
-        .from('conversations')
-        .insert({
-          'is_group': false,
-          'created_at': DateTime.now().toIso8601String(),
-        })
-        .select()
-        .maybeSingle();
+    try {
+      final created = await sup
+          .from('conversations')
+          .insert({
+            'is_group': false,
+            'created_at': DateTime.now().toIso8601String(),
+          })
+          .select()
+          .maybeSingle();
 
-    final convId = created == null ? null : created['id'];
-    if (convId == null) throw Exception('Failed to create conversation');
+      final convId = created == null ? null : created['id'];
+      if (convId == null) throw Exception('Failed to create conversation');
 
-    await sup.from('conversation_members').insert([
-      {'conversation_id': convId, 'user_id': a},
-      {'conversation_id': convId, 'user_id': b},
-    ]);
-    return convId.toString();
+      await sup.from('participants').insert([ // Corrigido
+        {'conversation_id': convId, 'user_id': a},
+        {'conversation_id': convId, 'user_id': b},
+      ]);
+      return convId.toString();
+    } catch (e) {
+      debugPrint('create conversation error: $e');
+      throw Exception('Falha ao criar nova conversa: $e');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Conversas')),
+
       drawer: Drawer(
         child: ListView(
           padding: EdgeInsets.zero,
@@ -380,64 +422,47 @@ class _ConversationsPageState extends State<ConversationsPage> {
                 );
               },
             ),
-            // --- SWITCH DE TEMA ---
-            ValueListenableBuilder<ThemeMode>(
-              valueListenable: themeNotifier,
-              builder: (ctx, value, _) {
-                return SwitchListTile(
-                  secondary: Icon(
-                    value == ThemeMode.dark
-                        ? Icons.dark_mode
-                        : Icons.light_mode,
-                  ),
-                  title: Text(
-                    value == ThemeMode.dark ? "Modo Escuro" : "Modo Claro",
-                  ),
-                  value: value == ThemeMode.dark,
-                  onChanged: (isDark) => themeNotifier.value = isDark
-                      ? ThemeMode.dark
-                      : ThemeMode.light,
-                );
-              },
-            ),
-            // ----------------------
+            
+            // Código do "theme_notifier" removido
+            
             ListTile(
               leading: const Icon(Icons.logout),
               title: const Text('Sair'),
               onTap: () async {
                 Navigator.pop(context); // Fecha o Drawer
                 await sup.auth.signOut();
-                // O main.dart vai detectar o logout e redirecionar
               },
             ),
           ],
         ),
       ),
+
       body: RefreshIndicator(
         onRefresh: _loadConversations,
         child: _loading
             ? const Center(child: CircularProgressIndicator())
             : _convs.isEmpty
-            ? const Center(child: Text("Nenhuma conversa ainda."))
-            : ListView.builder(
-                itemCount: _convs.length,
-                itemBuilder: (_, i) {
-                  final c = _convs[i];
-                  final title = (c['is_group'] == true)
-                      ? (c['name'] ?? 'Grupo')
-                      : (c['name'] ?? 'Conversa');
-                  return ListTile(
-                    leading: Icon(
-                      c['is_group'] == true ? Icons.group : Icons.person,
-                    ),
-                    title: Text(title),
-                    subtitle: Text(
-                      (c['is_public'] == true) ? 'Público' : 'Privado',
-                    ),
-                    onTap: () => _openConversation(c['id']),
-                  );
-                },
-              ),
+                ? const Center(child: Text("Nenhuma conversa ainda.")) // Mensagem de lista vazia
+                : ListView.builder(
+                    itemCount: _convs.length,
+                    itemBuilder: (_, i) {
+                      final c = _convs[i];
+                      final title = (c['is_group'] == true)
+                          ? (c['group_name'] ?? 'Grupo') // Corrigido
+                          : (c['group_name'] ?? 'Conversa'); // Corrigido
+
+                      return ListTile(
+                        leading: Icon(
+                          c['is_group'] == true ? Icons.group : Icons.person, // Ícone de grupo/pessoa
+                        ),
+                        title: Text(title),
+                        subtitle: Text(
+                          (c['is_public'] == true) ? 'Público' : 'Privado',
+                        ),
+                        onTap: () => _openConversation(c['id']),
+                      );
+                    },
+                  ),
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: _showCreateDialog,
