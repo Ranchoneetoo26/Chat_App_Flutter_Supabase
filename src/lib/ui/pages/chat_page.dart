@@ -1,16 +1,17 @@
-// lib/ui/pages/chat_page.dart
-
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
 import 'package:intl/intl.dart';
 import 'package:file_picker/file_picker.dart';
-import '../../main.dart'; 
+
+// Imports Corrigidos
+import '../../main.dart';
 import '../../services/chat_service.dart';
 import 'search_page.dart';
 import 'profile_page.dart';
-import '../widgets/message_reactions.dart';
 import 'conversations_page.dart';
+// Importa o widget de reações (necessário para o pop-up)
+import '../widgets/message_reactions.dart'; 
 
 class ChatPage extends StatefulWidget {
   final String? conversationId;
@@ -30,26 +31,30 @@ class _ChatPageState extends State<ChatPage> {
   Set<String> _onlineUsers = {};
   Set<String> _typingUsers = {};
   Timer? _typingTimer;
-  bool _isStatusHidden = false;
+  // bool _isStatusHidden = false; // REMOVIDO
   final Map<String, String> _userNames = {};
   bool _isSending = false;
   String? _editingMessageId;
 
-  // Valor padrão (exemplo). Recomendo passar `conversationId` via navegação.
-  static const String _kDefaultConversationId =
-      'd0363f19-e924-448a-8a6f-b35c6e488668';
+  // static const String _kDefaultConversationId = ... // REMOVIDO
+
+  @override
+  void initState() {
+    super.initState();
+    _setupPresenceSubscription();
+    // _loadHideStatus(); // REMOVIDO
+  }
 
   @override
   void dispose() {
     _removePresenceSubscription();
-    // cancelar assinaturas de reações
     _cancelAllReactionSubscriptions();
     messageController.dispose();
     scrollController.dispose();
     super.dispose();
   }
 
-  // --- Função Auxiliar de SnackBar para Feedback nesta tela ---
+  // --- Função Auxiliar de SnackBar ---
   void _showSnackBar(
     BuildContext context,
     String message, {
@@ -75,9 +80,10 @@ class _ChatPageState extends State<ChatPage> {
     final currentUser = supabase.auth.currentUser;
     if (currentUser == null) return;
 
-    final convId = widget.conversationId ?? _kDefaultConversationId;
+    // CORREÇÃO: Usa o ID obrigatório
+    final convId = widget.conversationId!;
 
-    // If we are editing an existing message, call update
+    // Editando
     if (_editingMessageId != null) {
       final editId = _editingMessageId!;
       try {
@@ -94,22 +100,18 @@ class _ChatPageState extends State<ChatPage> {
       return;
     }
 
-    // Sending new message with a 2s perception timeout.
+    // Enviando nova
     _isSending = true;
     if (mounted) setState(() {});
 
     try {
-      // try complete within 2 seconds for positive feedback
       await _chatService
           .sendMessage(convId, currentUser.id, text)
           .timeout(const Duration(seconds: 2));
 
-      // success within 2s
       if (mounted) _showSnackBar(context, 'Enviado');
     } on TimeoutException {
-      // didn't finish within 2s — show pending and continue sending in background
       if (mounted) _showSnackBar(context, 'Envio pendente...');
-      // Retry in background without timeout (or let supabase handle eventual consistency)
       _chatService.sendMessage(convId, currentUser.id, text).catchError((e) {
         debugPrint('background send error: $e');
         if (mounted)
@@ -162,12 +164,15 @@ class _ChatPageState extends State<ChatPage> {
       final currentUser = supabase.auth.currentUser;
       if (currentUser == null) return;
 
-      final convId = widget.conversationId ?? _kDefaultConversationId;
+      // CORREÇÃO: Usa o ID obrigatório
+      final convId = widget.conversationId!;
+      // ##### CORREÇÃO: Usando 'media_url' e 'media_type' (do seu banco) #####
       await supabase.from('messages').insert({
         'sender_id': currentUser.id,
         'content_text': '',
         'conversation_id': convId,
-        'attachment_url': url,
+        'media_url': url, // 
+        'media_type': f.extension ?? 'file', // 
         'created_at': DateTime.now().toIso8601String(),
       });
 
@@ -199,16 +204,16 @@ class _ChatPageState extends State<ChatPage> {
             final userId = key.toString();
             final presList = (value is List) ? value : [value];
             for (final p in presList) {
-              bool hidden = false;
+              // bool hidden = false; // REMOVIDO
               String? status;
               if (p is Map) {
-                hidden = (p['hide_status'] as bool?) ?? false;
+                // hidden = (p['hide_status'] as bool?) ?? false; // REMOVIDO
                 status = p['status']?.toString();
               } else {
                 status = p.toString();
               }
 
-              if (!hidden) online.add(userId);
+              online.add(userId); // CORRIGIDO (removido 'if !hidden')
               if (status == 'typing') typing.add(userId);
               _loadUserName(userId);
             }
@@ -235,7 +240,8 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> _removePresenceSubscription() async {
     try {
-      await (_presenceChannel.presence as dynamic).untrack();
+      // ##### CORREÇÃO: Chamada no canal, não no presence #####
+      await _presenceChannel.untrack(); // 
     } catch (e) {
       debugPrint('untrack error: $e');
     }
@@ -251,15 +257,16 @@ class _ChatPageState extends State<ChatPage> {
     if (currentUser == null) return;
 
     try {
-      if (_isStatusHidden) {
-        await (_presenceChannel.presence as dynamic).untrack();
-        return;
-      }
+      // if (_isStatusHidden) { // REMOVIDO
+      //   await _presenceChannel.untrack();
+      //   return; 
+      // } 
 
-      await (_presenceChannel.presence as dynamic).track({
+      // ##### CORREÇÃO: Chamada no canal e remoção de 'hide_status' #####
+      await _presenceChannel.track({ // 
         'user_id': currentUser.id,
         'status': typing ? 'typing' : 'online',
-        'hide_status': _isStatusHidden,
+        // 'hide_status': _isStatusHidden, // REMOVIDO
         'updated_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
@@ -270,7 +277,8 @@ class _ChatPageState extends State<ChatPage> {
   void _onMessageChanged(String v) {
     _typingTimer?.cancel();
     _trackUserStatus(typing: true);
-    _typingTimer = Timer(kTypingDelay, () {
+    // ##### CORREÇÃO: kTypDelay -> kTypingDelay #####
+    _typingTimer = Timer(kTypingDelay, () { 
       _trackUserStatus(typing: false);
     });
   }
@@ -280,11 +288,12 @@ class _ChatPageState extends State<ChatPage> {
     try {
       final res = await supabase
           .from('profiles')
-          .select('id, username, full_name')
+          .select('id, username, full_name, email') // CORREÇÃO: Adicionado email
           .eq('id', userId)
           .maybeSingle();
       if (res != null) {
-        final name = (res['full_name'] ?? res['username'] ?? '').toString();
+        // CORREÇÃO: Adicionado email como fallback
+        final name = (res['full_name'] ?? res['username'] ?? res['email'] ?? '').toString(); 
         _userNames[userId] = name.isNotEmpty ? name : userId;
         if (mounted) setState(() {});
       }
@@ -381,7 +390,12 @@ class _ChatPageState extends State<ChatPage> {
     if (messageId.isEmpty) return;
     if (_reactionSubs.containsKey(messageId)) return;
 
-    final sub = _chatService.streamReactions(messageId).listen((list) {
+    // ##### CORREÇÃO: Sintaxe do .stream() #####
+    final sub = supabase
+        .from('message_reactions') // 1. Tabela
+        .stream(primaryKey: ['id']) // 2. Stream
+        .eq('message_id', messageId) // 3. Filtro
+        .listen((list) { // 4. Listen
       final Map<String, int> agg = {};
       for (final row in list) {
         final r = (row['reaction'] ?? '').toString();
@@ -463,10 +477,9 @@ class _ChatPageState extends State<ChatPage> {
             child: Center(child: Text('${_onlineUsers.length} online')),
           ),
         ],
-        // Adiciona o ícone de menu (hambúrguer)
       ),
 
-      // 1. ADICIONANDO DRAWER (MENU LATERAL) PARA PERFIL E LOGOUT
+      // 1. ADICIONANDO DRAWER (MENU LATERAL)
       drawer: Drawer(
         child: ListView(
           padding: EdgeInsets.zero,
@@ -488,20 +501,14 @@ class _ChatPageState extends State<ChatPage> {
                 );
               },
             ),
-            SwitchListTile(
-              title: const Text('Ocultar meu status'),
-              value: _isStatusHidden,
-              onChanged: (v) async {
-                await _persistHideStatus(v);
-              },
-              secondary: const Icon(Icons.visibility_off),
-            ),
+            // ##### REMOVIDO SwitchListTile para 'hide_status' #####
             ListTile(
               leading: const Icon(Icons.chat),
               title: const Text('Conversas'),
               onTap: () {
                 Navigator.pop(context);
-                Navigator.of(context).push(
+                // Evita empilhar a mesma tela
+                Navigator.of(context).pushReplacement(
                   MaterialPageRoute(builder: (_) => const ConversationsPage()),
                 );
               },
@@ -523,15 +530,20 @@ class _ChatPageState extends State<ChatPage> {
         children: [
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
+              
+              // ########## INÍCIO DA CORREÇÃO (ORDEM DO STREAM) ##########
+              // A sintaxe correta para stream COM join é diferente
               stream: supabase
                   .from('messages')
                   .stream(primaryKey: ['id'])
                   .eq(
                     'conversation_id',
-                    widget.conversationId ?? _kDefaultConversationId,
+                    widget.conversationId!,
                   )
                   .order('created_at', ascending: true)
                   .map((data) => List<Map<String, dynamic>>.from(data as List)),
+              // ########## FIM DA CORREÇÃO ##########
+
               builder: (_, snapshot) {
                 if (snapshot.hasError) {
                   // Exibe erro do Supabase (ex: RLS, coluna faltando)
@@ -551,8 +563,8 @@ class _ChatPageState extends State<ChatPage> {
                 }
 
                 final messages = snapshot.data!;
+                _scrollToBottom(); // Rola para o fim
 
-                // ⚠️ Se 'messages.isEmpty' mas há mensagens no DB, o problema é RLS ou CONVERSATION_ID.
                 if (messages.isEmpty) {
                   return const Center(
                     child: Text(
@@ -570,8 +582,12 @@ class _ChatPageState extends State<ChatPage> {
                   itemCount: messages.length,
                   itemBuilder: (_, i) {
                     final msg = messages[i];
+                    
+                    // CORREÇÃO: Pega o nome do cache _userNames
+                    // A função _loadUserName é chamada no onSync da presença
                     final userName =
-                        msg['profiles']?['full_name'] ?? 'Usuário Desconhecido';
+                        _userNames[msg['sender_id']] ?? 'Usuário...';
+                    
                     final mine = msg['sender_id'] == currentUser?.id;
                     final initials = userName.isNotEmpty
                         ? userName.substring(0, 1).toUpperCase()
@@ -581,7 +597,6 @@ class _ChatPageState extends State<ChatPage> {
                       'HH:mm',
                     ).format(DateTime.parse(msg['created_at']));
 
-                    // Carrega reações para esta mensagem (assíncrono/cache) e garante subscription em tempo real
                     final msgId = msg['id']?.toString() ?? '';
                     _fetchReactions(msgId);
                     _ensureReactionSubscription(msgId);
@@ -780,7 +795,6 @@ class _ChatPageState extends State<ChatPage> {
                               ],
                             ),
                           ),
-                          // indicador online: um ponto verde ao lado do avatar
                           if (!mine)
                             Padding(
                               padding: const EdgeInsets.only(left: 8.0),
@@ -895,49 +909,6 @@ class _ChatPageState extends State<ChatPage> {
       ),
     );
   }
-
-  @override
-  void initState() {
-    super.initState();
-    _setupPresenceSubscription();
-    _loadHideStatus();
-  }
-
-  Future<void> _loadHideStatus() async {
-    final currentUser = supabase.auth.currentUser;
-    if (currentUser == null) return;
-    try {
-      final res = await supabase
-          .from('profiles')
-          .select('hide_status')
-          .eq('id', currentUser.id)
-          .maybeSingle();
-      if (res != null && res.containsKey('hide_status')) {
-        final v = (res['hide_status'] as bool?) ?? false;
-        setState(() {
-          _isStatusHidden = v;
-        });
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _persistHideStatus(bool v) async {
-    final currentUser = supabase.auth.currentUser;
-    if (currentUser == null) return;
-    try {
-      await supabase
-          .from('profiles')
-          .update({'hide_status': v})
-          .eq('id', currentUser.id);
-      setState(() => _isStatusHidden = v);
-      // Atualiza presença imediatamente
-      await _trackUserStatus(typing: false);
-    } catch (e) {
-      if (mounted) {
-        _showSnackBar(context, 'Erro ao salvar preferência: $e', isError: true);
-      } else {
-        debugPrint('persistHideStatus error: $e');
-      }
-    }
-  }
+  
+  // ##### FUNÇÕES DE 'hide_status' REMOVIDAS #####
 }
