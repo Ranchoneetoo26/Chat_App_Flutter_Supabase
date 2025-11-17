@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+// IMPORT CORRIGIDO: Aponta para a raiz onde está o main.dart e o themeNotifier
+import '../../../main.dart';
 import 'chat_page.dart';
 import 'profile_page.dart';
 
@@ -15,7 +18,7 @@ class _ConversationsPageState extends State<ConversationsPage> {
   List<Map<String, dynamic>> _convs = [];
   bool _loading = false;
   final sup = Supabase.instance.client;
-  // Subscriptions usando streams (mais compatível com a versão do SDK)
+
   StreamSubscription<List<Map<String, dynamic>>>? _membersSub;
   StreamSubscription<List<Map<String, dynamic>>>? _convsSub;
 
@@ -44,7 +47,6 @@ class _ConversationsPageState extends State<ConversationsPage> {
   void _setupRealtime() {
     final currentUser = sup.auth.currentUser;
     if (currentUser == null) return;
-    // Usa stream() para receber updates em tempo real e recarregar a lista
     try {
       _membersSub = sup
           .from('conversation_members')
@@ -68,16 +70,16 @@ class _ConversationsPageState extends State<ConversationsPage> {
   }
 
   Future<void> _loadConversations() async {
+    if (!mounted) return;
     setState(() => _loading = true);
     try {
       final currentUser = sup.auth.currentUser;
       if (currentUser == null) {
         _convs = [];
-        setState(() => _loading = false);
+        if (mounted) setState(() => _loading = false);
         return;
       }
 
-      // fetch conversation_ids where current user is participant
       final members = await sup
           .from('conversation_members')
           .select('conversation_id')
@@ -87,25 +89,28 @@ class _ConversationsPageState extends State<ConversationsPage> {
           .map((e) => e['conversation_id'])
           .where((e) => e != null)
           .toList();
+
       if (ids.isEmpty) {
         _convs = [];
-        setState(() => _loading = false);
+        if (mounted) setState(() => _loading = false);
         return;
       }
 
       final idList = ids.map((e) => e.toString()).toList();
-      final inExpr = '("' + idList.join('","') + '")';
+      // Filtro corrigido para funcionar com versões mais novas do Supabase
       final res = await sup
           .from('conversations')
           .select(
             'id, name, is_group, is_public, created_at, updated_at, created_by',
           )
-          .filter('id', 'in', inExpr)
+          .filter('id', 'in', '(${idList.join(',')})')
           .order('updated_at', ascending: false);
 
       _convs = List<Map<String, dynamic>>.from(res as List);
-    } catch (_) {}
-    setState(() => _loading = false);
+    } catch (e) {
+      debugPrint("Erro ao carregar conversas: $e");
+    }
+    if (mounted) setState(() => _loading = false);
   }
 
   void _openConversation(dynamic convId) {
@@ -115,6 +120,239 @@ class _ConversationsPageState extends State<ConversationsPage> {
         builder: (_) => ChatPage(conversationId: convId.toString()),
       ),
     );
+  }
+
+  // --- Lógica Completa de Criar Conversa ---
+  void _showCreateDialog() {
+    final currentUser = sup.auth.currentUser;
+    if (currentUser == null) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true, // Para o teclado não cobrir o modal
+      builder: (ctx) {
+        final TextEditingController searchController = TextEditingController();
+        final TextEditingController nameController = TextEditingController();
+        bool isGroup = false;
+        bool isPublic = false;
+
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(ctx).viewInsets.bottom, // Ajuste teclado
+          ),
+          child: StatefulBuilder(
+            builder: (ctx, setState) {
+              return Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      "Nova Conversa",
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Checkbox(
+                          value: isGroup,
+                          onChanged: (v) =>
+                              setState(() => isGroup = v ?? false),
+                        ),
+                        const Text('Criar grupo'),
+                        const Spacer(),
+                        if (isGroup)
+                          Row(
+                            children: [
+                              const Text('Público'),
+                              Checkbox(
+                                value: isPublic,
+                                onChanged: (v) =>
+                                    setState(() => isPublic = v ?? false),
+                              ),
+                            ],
+                          ),
+                      ],
+                    ),
+                    if (isGroup)
+                      TextField(
+                        controller: nameController,
+                        decoration: const InputDecoration(
+                          labelText: 'Nome do grupo',
+                          prefixIcon: Icon(Icons.group),
+                        ),
+                      ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: searchController,
+                      decoration: const InputDecoration(
+                        labelText: 'Buscar usuário (email ou username)',
+                        prefixIcon: Icon(Icons.person_search),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 45,
+                      child: ElevatedButton(
+                        onPressed: () async {
+                          final query = searchController.text.trim();
+                          if (query.isEmpty && !isGroup)
+                            return; // Se não for grupo, precisa buscar alguém
+
+                          // Lógica de busca
+                          Map<String, dynamic>? otherUser;
+                          if (query.isNotEmpty) {
+                            final res = await sup
+                                .from('profiles')
+                                .select('id, email, username')
+                                .or('email.eq.$query,username.eq.$query')
+                                .maybeSingle();
+
+                            if (res == null && !isGroup) {
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(ctx).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Usuário não encontrado'),
+                                ),
+                              );
+                              return;
+                            }
+                            otherUser = res;
+                          }
+
+                          final otherId = otherUser != null
+                              ? otherUser['id']
+                              : null;
+
+                          // 1. Conversa Privada (1:1)
+                          if (!isGroup) {
+                            if (otherId == null) return;
+                            // Verifica se já existe conversa
+                            final convId =
+                                await _findOrCreatePrivateConversation(
+                                  currentUser.id,
+                                  otherId,
+                                );
+                            if (!mounted) return;
+                            Navigator.pop(ctx); // Fecha modal
+                            _openConversation(convId);
+                            return;
+                          }
+
+                          // 2. Criar Grupo
+                          final created = await sup
+                              .from('conversations')
+                              .insert({
+                                'name': nameController.text.trim().isEmpty
+                                    ? 'Novo Grupo'
+                                    : nameController.text.trim(),
+                                'is_group': true,
+                                'is_public': isPublic,
+                                'created_by': currentUser.id,
+                                'created_at': DateTime.now().toIso8601String(),
+                              })
+                              .select()
+                              .maybeSingle();
+
+                          if (created != null) {
+                            final convId = created['id'];
+                            // Adiciona o criador
+                            await sup.from('conversation_members').insert([
+                              {
+                                'conversation_id': convId,
+                                'user_id': currentUser.id,
+                              },
+                            ]);
+                            // Adiciona o outro usuário se foi buscado
+                            if (otherId != null) {
+                              await sup.from('conversation_members').insert([
+                                {'conversation_id': convId, 'user_id': otherId},
+                              ]);
+                            }
+                            if (!mounted) return;
+                            Navigator.pop(ctx);
+                            _openConversation(convId);
+                          }
+                        },
+                        child: const Text('Iniciar'),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  Future<String> _findOrCreatePrivateConversation(String a, String b) async {
+    try {
+      // Busca conversas do user A
+      final resA = await sup
+          .from('conversation_members')
+          .select('conversation_id')
+          .eq('user_id', a);
+      // Busca conversas do user B
+      final resB = await sup
+          .from('conversation_members')
+          .select('conversation_id')
+          .eq('user_id', b);
+
+      final idsA = (resA as List)
+          .map((e) => e['conversation_id']?.toString())
+          .where((e) => e != null)
+          .toSet();
+      final idsB = (resB as List)
+          .map((e) => e['conversation_id']?.toString())
+          .where((e) => e != null)
+          .toSet();
+
+      // Acha a interseção (conversas em comum)
+      final common = idsA.intersection(idsB);
+
+      if (common.isNotEmpty) {
+        final idList = common.toList();
+        // Verifica qual delas NÃO é grupo
+        final convs = await sup
+            .from('conversations')
+            .select('id')
+            .filter('id', 'in', '(${idList.join(',')})')
+            .eq('is_group', false);
+
+        final convsList = convs as List? ?? [];
+        if (convsList.isNotEmpty) {
+          return convsList.first['id'].toString();
+        }
+      }
+    } catch (e) {
+      debugPrint('find conversation error: $e');
+    }
+
+    // Se não achou, cria nova
+    final created = await sup
+        .from('conversations')
+        .insert({
+          'is_group': false,
+          'created_at': DateTime.now().toIso8601String(),
+        })
+        .select()
+        .maybeSingle();
+
+    final convId = created == null ? null : created['id'];
+    if (convId == null) throw Exception('Failed to create conversation');
+
+    await sup.from('conversation_members').insert([
+      {'conversation_id': convId, 'user_id': a},
+      {'conversation_id': convId, 'user_id': b},
+    ]);
+    return convId.toString();
   }
 
   @override
@@ -142,13 +380,34 @@ class _ConversationsPageState extends State<ConversationsPage> {
                 );
               },
             ),
+            // --- SWITCH DE TEMA ---
+            ValueListenableBuilder<ThemeMode>(
+              valueListenable: themeNotifier,
+              builder: (ctx, value, _) {
+                return SwitchListTile(
+                  secondary: Icon(
+                    value == ThemeMode.dark
+                        ? Icons.dark_mode
+                        : Icons.light_mode,
+                  ),
+                  title: Text(
+                    value == ThemeMode.dark ? "Modo Escuro" : "Modo Claro",
+                  ),
+                  value: value == ThemeMode.dark,
+                  onChanged: (isDark) => themeNotifier.value = isDark
+                      ? ThemeMode.dark
+                      : ThemeMode.light,
+                );
+              },
+            ),
+            // ----------------------
             ListTile(
               leading: const Icon(Icons.logout),
               title: const Text('Sair'),
               onTap: () async {
                 Navigator.pop(context); // Fecha o Drawer
                 await sup.auth.signOut();
-                // O main.dart cuida do redirecionamento
+                // O main.dart vai detectar o logout e redirecionar
               },
             ),
           ],
@@ -158,6 +417,8 @@ class _ConversationsPageState extends State<ConversationsPage> {
         onRefresh: _loadConversations,
         child: _loading
             ? const Center(child: CircularProgressIndicator())
+            : _convs.isEmpty
+            ? const Center(child: Text("Nenhuma conversa ainda."))
             : ListView.builder(
                 itemCount: _convs.length,
                 itemBuilder: (_, i) {
@@ -166,7 +427,9 @@ class _ConversationsPageState extends State<ConversationsPage> {
                       ? (c['name'] ?? 'Grupo')
                       : (c['name'] ?? 'Conversa');
                   return ListTile(
-                    leading: const Icon(Icons.chat_bubble_outline),
+                    leading: Icon(
+                      c['is_group'] == true ? Icons.group : Icons.person,
+                    ),
                     title: Text(title),
                     subtitle: Text(
                       (c['is_public'] == true) ? 'Público' : 'Privado',
@@ -181,194 +444,5 @@ class _ConversationsPageState extends State<ConversationsPage> {
         child: const Icon(Icons.add),
       ),
     );
-  }
-
-  void _showCreateDialog() {
-    final currentUser = sup.auth.currentUser;
-    if (currentUser == null) return;
-
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) {
-        final TextEditingController searchController = TextEditingController();
-        final TextEditingController nameController = TextEditingController();
-        bool isGroup = false;
-        bool isPublic = false;
-
-        return StatefulBuilder(
-          builder: (ctx, setState) {
-            return Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Checkbox(
-                        value: isGroup,
-                        onChanged: (v) => setState(() => isGroup = v ?? false),
-                      ),
-                      const Text('Criar grupo'),
-                      const Spacer(),
-                      if (isGroup)
-                        Row(
-                          children: [
-                            const Text('Público'),
-                            Checkbox(
-                              value: isPublic,
-                              onChanged: (v) =>
-                                  setState(() => isPublic = v ?? false),
-                            ),
-                          ],
-                        ),
-                    ],
-                  ),
-                  if (isGroup)
-                    TextField(
-                      controller: nameController,
-                      decoration: const InputDecoration(
-                        labelText: 'Nome do grupo',
-                      ),
-                    ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: searchController,
-                    decoration: const InputDecoration(
-                      labelText: 'Buscar usuário por email ou username',
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  ElevatedButton(
-                    onPressed: () async {
-                      final query = searchController.text.trim();
-                      if (query.isEmpty) return;
-
-                      // search by email or username
-                      final res = await sup
-                          .from('profiles')
-                          .select('id, email, username')
-                          .or('email.eq.$query,username.eq.$query')
-                          .maybeSingle();
-
-                      if (res == null && !isGroup) {
-                        ScaffoldMessenger.of(ctx).showSnackBar(
-                          const SnackBar(
-                            content: Text('Usuário não encontrado'),
-                          ),
-                        );
-                        return;
-                      }
-
-                      final otherId = res != null ? res['id'] : null;
-
-                      if (!isGroup) {
-                        if (otherId == null) return;
-                        // find existing 1:1 conversation between current user and otherId
-                        final convId = await _findOrCreatePrivateConversation(
-                          currentUser.id,
-                          otherId,
-                        );
-                        if (!mounted) return;
-                        Navigator.of(context).pop();
-                        _openConversation(convId);
-                        return;
-                      }
-
-                      // create group (public/private)
-                      final created = await sup
-                          .from('conversations')
-                          .insert({
-                            'name': nameController.text.trim(),
-                            'is_group': true,
-                            'is_public': isPublic,
-                            'created_by': currentUser.id,
-                            'created_at': DateTime.now().toIso8601String(),
-                          })
-                          .select()
-                          .maybeSingle();
-
-                      if (created != null) {
-                        final convId = created['id'];
-                        await sup.from('conversation_members').insert([
-                          {
-                            'conversation_id': convId,
-                            'user_id': currentUser.id,
-                          },
-                        ]);
-                        if (otherId != null) {
-                          await sup.from('conversation_members').insert([
-                            {'conversation_id': convId, 'user_id': otherId},
-                          ]);
-                        }
-                        if (!mounted) return;
-                        Navigator.of(context).pop();
-                        _openConversation(convId);
-                      }
-                    },
-                    child: const Text('Criar'),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Future<String> _findOrCreatePrivateConversation(String a, String b) async {
-    try {
-      // get conversation ids for each user
-      final resA = await sup
-          .from('conversation_members')
-          .select('conversation_id')
-          .eq('user_id', a);
-      final resB = await sup
-          .from('conversation_members')
-          .select('conversation_id')
-          .eq('user_id', b);
-      final idsA = (resA as List)
-          .map((e) => e['conversation_id']?.toString())
-          .where((e) => e != null)
-          .toSet();
-      final idsB = (resB as List)
-          .map((e) => e['conversation_id']?.toString())
-          .where((e) => e != null)
-          .toSet();
-      final common = idsA.intersection(idsB);
-      if (common.isNotEmpty) {
-        // verify any common conversation is not a group
-        final idList = common.toList();
-        final inExpr = '("' + idList.join('","') + '")';
-        final convs = await sup
-            .from('conversations')
-            .select('id')
-            .filter('id', 'in', inExpr)
-            .eq('is_group', false);
-        final convsList = convs as List? ?? <dynamic>[];
-        if (convsList.isNotEmpty) {
-          return convsList.first['id'].toString();
-        }
-      }
-    } catch (e) {
-      debugPrint('find conversation error: $e');
-    }
-
-    // create new private conversation
-    final created = await sup
-        .from('conversations')
-        .insert({
-          'is_group': false,
-          'created_at': DateTime.now().toIso8601String(),
-        })
-        .select()
-        .maybeSingle();
-    final convId = created == null ? null : created['id'];
-    if (convId == null) throw Exception('Failed to create conversation');
-    await sup.from('conversation_members').insert([
-      {'conversation_id': convId, 'user_id': a},
-      {'conversation_id': convId, 'user_id': b},
-    ]);
-    return convId.toString();
   }
 }

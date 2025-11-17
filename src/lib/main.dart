@@ -1,20 +1,28 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:app/ui/pages/chat_page.dart';
+import 'package:app/ui/pages/update_password_page.dart';
 import 'package:app/ui/widgets/custom_button.dart';
 import 'package:app/ui/widgets/custom_input.dart';
 import 'package:app/ui/widgets/custom_text_button.dart';
 import 'package:app/ui/pages/conversations_page.dart';
 
+// --- 1. CONTROLE GLOBAL DE TEMA E NAVEGAÇÃO ---
+final themeNotifier = ValueNotifier<ThemeMode>(ThemeMode.system);
+
+// Instância global do cliente Supabase
 final supabase = Supabase.instance.client;
+
+// 🔴 CORREÇÃO: Chave global para navegação sem contexto
+final navigatorKey = GlobalKey<NavigatorState>();
+
 const String kPresenceChannelName = 'online_users';
 const Duration kTypingDelay = Duration(seconds: 3);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 🚨 AVISO CRÍTICO: SUBSTITUA ESTES VALORES PELOS SEUS REAIS!
+  // Inicialização do Supabase
   await Supabase.initialize(
     url: 'https://ihsluigtpkgasyknldsa.supabase.co',
     anonKey:
@@ -32,24 +40,43 @@ class MainApp extends StatefulWidget {
 }
 
 class _MainAppState extends State<MainApp> {
-  // controllers
+  // Controladores de texto
   final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
-  final TextEditingController searchController = TextEditingController();
-  final _formKey = GlobalKey<FormState>(); // Chave para o Form
+  final _formKey = GlobalKey<FormState>();
 
-  // presence & auth state
+  // Estado de presença e autenticação
   late RealtimeChannel _presenceChannel;
   String? _currentUserId;
-  // presence user set removed from main (managed per-chat)
+
+  // Variáveis de status
   final bool _isTyping = false;
   Timer? _typingTimer;
   final bool _isStatusHidden = false;
   final Map<String, Map<String, String>> _userNames = {};
 
-  // Variáveis removidas para limpar warnings: _typingUserId, _userSearchResults, _groupSearchResults
+  @override
+  void initState() {
+    super.initState();
+    _initSupabaseAuthListener();
+    // Tenta configurar presença se já houver usuário logado
+    if (supabase.auth.currentUser != null) {
+      _currentUserId = supabase.auth.currentUser!.id;
+      _setupPresenceSubscription();
+    }
+  }
 
-  // 🚨 CORREÇÃO: Função _showSnackBar agora aceita um BuildContext explícito
+  @override
+  void dispose() {
+    _removePresenceSubscription();
+    emailController.dispose();
+    passwordController.dispose();
+    _typingTimer?.cancel();
+    super.dispose();
+  }
+
+  // --- Funções de Auxílio de UI ---
+
   void _showSnackBar(
     BuildContext context,
     String message, {
@@ -65,22 +92,20 @@ class _MainAppState extends State<MainApp> {
     }
   }
 
-  @override
-  void initState() {
-    super.initState();
-    _initSupabaseAuthListener();
-    _setupPresenceSubscription();
-  }
+  // --- Lógica do Supabase e Presença ---
 
   void _initSupabaseAuthListener() {
-    if (supabase.auth.currentUser != null) {
-      _currentUserId = supabase.auth.currentUser!.id;
-      _setupPresenceSubscription();
-    }
-
     supabase.auth.onAuthStateChange.listen((data) {
       final event = data.event;
       final session = data.session;
+
+      if (event == AuthChangeEvent.passwordRecovery) {
+        // 🔴 CORREÇÃO: Usando navigatorKey para navegar
+        navigatorKey.currentState?.push(
+          MaterialPageRoute(builder: (_) => const UpdatePasswordPage()),
+        );
+        return;
+      }
 
       if (event == AuthChangeEvent.signedIn && session != null) {
         _currentUserId = session.user.id;
@@ -88,9 +113,7 @@ class _MainAppState extends State<MainApp> {
       } else if (event == AuthChangeEvent.signedOut) {
         _removePresenceSubscription();
         _currentUserId = null;
-        setState(() {
-          // cleared auth state
-        });
+        if (mounted) setState(() {});
       }
     });
   }
@@ -103,33 +126,16 @@ class _MainAppState extends State<MainApp> {
 
     presence.onSync(() {
       final dynamic rawState = presence.state;
-      final onlineUsers = <String>{};
-
       if (rawState is Map) {
         rawState.forEach((key, value) {
           final userId = key.toString();
           final presences = (value is List) ? value : [value];
           for (final p in presences) {
-            bool hidden = false;
-
-            if (p is Map) {
-              hidden = (p['hide_status'] as bool?) ?? false;
-            }
-
             _loadUserName(userId);
-
-            if (!hidden) onlineUsers.add(userId);
-            // Removido o uso de _typingUserId pois estava causando warnings e não estava sendo usado na tela
-            // if (status == 'typing' && userId != _currentUserId) {
-            //   typingUser = userId;
-            // }
           }
         });
       }
-
-      setState(() {
-        // presence updated (state kept local)
-      });
+      if (mounted) setState(() {});
     });
 
     _presenceChannel.subscribe((status, [error]) {
@@ -141,13 +147,11 @@ class _MainAppState extends State<MainApp> {
 
   Future<void> _trackUserStatus() async {
     if (_currentUserId == null) return;
-
     try {
       if (_isStatusHidden) {
         await _presenceChannel.presence.untrack();
         return;
       }
-
       await _presenceChannel.track({
         'user_id': _currentUserId,
         'status': _isTyping ? 'typing' : 'online',
@@ -162,18 +166,34 @@ class _MainAppState extends State<MainApp> {
   Future<void> _removePresenceSubscription() async {
     try {
       await _presenceChannel.presence.untrack();
-    } catch (e) {
-      debugPrint('removePresenceSubscription error: $e');
-    }
-
+    } catch (_) {}
     try {
       await supabase.removeChannel(_presenceChannel);
+    } catch (_) {}
+  }
+
+  Future<void> _loadUserName(String userId) async {
+    if (_userNames.containsKey(userId)) return;
+    try {
+      final res = await supabase
+          .from('profiles')
+          .select('id, username, full_name')
+          .eq('id', userId)
+          .maybeSingle();
+      if (res != null) {
+        _userNames[userId] = {
+          'username': (res['username'] ?? '').toString(),
+          'full_name': (res['full_name'] ?? '').toString(),
+        };
+        if (mounted) setState(() {});
+      }
     } catch (e) {
-      debugPrint('removeChannel error: $e');
+      debugPrint('loadUserName error: $e');
     }
   }
 
-  // 🚨 CORREÇÃO: Função _cadastrarUsuario agora aceita o BuildContext
+  // --- Lógica de Autenticação (Login, Cadastro, Reset) ---
+
   Future<void> _cadastrarUsuario(BuildContext context) async {
     final email = emailController.text.trim();
     final pass = passwordController.text.trim();
@@ -196,94 +216,163 @@ class _MainAppState extends State<MainApp> {
       }
     } catch (e) {
       if (mounted) {
-        _showSnackBar(
-          context,
-          "Erro inesperado. Verifique sua conexão e chaves.",
-          isError: true,
-        );
-      } else {
-        debugPrint('signup error: $e');
+        _showSnackBar(context, "Erro inesperado: $e", isError: true);
       }
     }
   }
 
-  // Funções de Busca e Auxiliares Removidas, pois não estavam sendo usadas no Build
-  // (Ex.: _searchUsers, _searchGroups, _runSearch) para limpar warnings.
-
-  Future<void> _loadUserName(String userId) async {
-    if (_userNames.containsKey(userId)) return;
+  Future<void> _resetPassword(BuildContext context) async {
+    final email = emailController.text.trim();
+    if (email.isEmpty) {
+      _showSnackBar(
+        context,
+        'Por favor, digite seu email no campo acima para recuperar a senha.',
+        isError: true, // Mostra em vermelho para alertar
+      );
+      return;
+    }
 
     try {
-      final res = await supabase
-          .from('profiles')
-          .select('id, username, full_name')
-          .eq('id', userId)
-          .maybeSingle();
-      if (res != null) {
-        _userNames[userId] = {
-          'username': (res['username'] ?? '').toString(),
-          'full_name': (res['full_name'] ?? '').toString(),
-        };
-        if (mounted) setState(() {});
-      }
+      await supabase.auth.resetPasswordForEmail(email);
+      if (!mounted) return;
+      _showSnackBar(
+        context,
+        'Email de recuperação enviado! Verifique sua caixa de entrada.',
+        isError: false,
+      );
     } catch (e) {
-      debugPrint('loadUserName error: $e');
+      if (!mounted) return;
+      _showSnackBar(context, 'Erro ao enviar email: $e', isError: true);
     }
   }
 
-  @override
-  void dispose() {
-    _removePresenceSubscription();
-    emailController.dispose();
-    passwordController.dispose();
-    searchController.dispose();
-    _typingTimer?.cancel();
-    super.dispose();
-  }
+  // --- Interface Visual ---
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<AuthState>(
-      stream: supabase.auth.onAuthStateChange,
-      builder: (context, snapshot) {
-        final loggedIn = snapshot.data?.session != null;
+    // O ValueListenableBuilder "ouve" as mudanças no themeNotifier
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: themeNotifier,
+      builder: (context, currentMode, _) {
+        return StreamBuilder<AuthState>(
+          stream: supabase.auth.onAuthStateChange,
+          builder: (context, snapshot) {
+            final loggedIn = snapshot.data?.session != null;
 
-        return MaterialApp(
-          debugShowCheckedModeBanner: false,
-          theme: ThemeData(
-            primarySwatch: Colors.blue,
-            scaffoldBackgroundColor: const Color(0xFFF1F4FF),
-            appBarTheme: const AppBarTheme(
-              backgroundColor: Colors.blue,
-              foregroundColor: Colors.white,
-              elevation: 2,
-            ),
-          ),
-          home: loggedIn ? const ConversationsPage() : _buildLoginScreen(),
+            return MaterialApp(
+              // 🔴 CORREÇÃO: Conectando a chave global aqui
+              navigatorKey: navigatorKey,
+              debugShowCheckedModeBanner: false,
+
+              // --- CONFIGURAÇÃO DE TEMAS ---
+              themeMode: currentMode,
+
+              // Tema Claro
+              theme: ThemeData(
+                brightness: Brightness.light,
+                primarySwatch: Colors.blue,
+                scaffoldBackgroundColor: const Color(0xFFF1F4FF),
+                appBarTheme: const AppBarTheme(
+                  backgroundColor: Colors.blue,
+                  foregroundColor: Colors.white,
+                  elevation: 2,
+                ),
+                inputDecorationTheme: InputDecorationTheme(
+                  fillColor: Colors.white,
+                  filled: true,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+
+              // Tema Escuro
+              darkTheme: ThemeData(
+                brightness: Brightness.dark,
+                primarySwatch: Colors.blue,
+                scaffoldBackgroundColor: const Color(0xFF121212),
+                appBarTheme: AppBarTheme(
+                  backgroundColor: Colors.grey[900],
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                ),
+                inputDecorationTheme: InputDecorationTheme(
+                  fillColor: Colors.grey[800],
+                  filled: true,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  labelStyle: const TextStyle(color: Colors.grey),
+                ),
+                textTheme: const TextTheme(
+                  bodyMedium: TextStyle(color: Colors.white),
+                ),
+              ),
+
+              home: loggedIn ? const ConversationsPage() : _buildLoginScreen(),
+            );
+          },
         );
       },
     );
   }
 
-  // 🚨 CORREÇÃO PRINCIPAL: Usando Builder para obter um contexto válido abaixo do Scaffold.
   Widget _buildLoginScreen() {
     return Scaffold(
+      // Botão de Tema Flutuante (Sol/Lua)
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        child: Icon(
+          themeNotifier.value == ThemeMode.dark
+              ? Icons.light_mode
+              : Icons.dark_mode,
+          color: Colors.grey,
+        ),
+        onPressed: () {
+          themeNotifier.value = themeNotifier.value == ThemeMode.dark
+              ? ThemeMode.light
+              : ThemeMode.dark;
+        },
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endTop,
+
       body: Center(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 520),
-            // O Builder garante que o contexto (innerContext) aqui está ABAIXO do Scaffold
             child: Builder(
               builder: (innerContext) {
+                final isDark =
+                    Theme.of(innerContext).brightness == Brightness.dark;
+
                 return Form(
                   key: _formKey,
+                  // 🔴 MÁGICA: Valida assim que o usuário interage
+                  autovalidateMode: AutovalidateMode.onUserInteraction,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const SizedBox(height: 32),
+                      // 1. LOGO
+                      // Se tiver imagem: Image.asset('assets/images/logo.png', height: 120),
+                      const Icon(
+                        Icons.chat_bubble_outline,
+                        size: 100,
+                        color: Colors.blue,
+                      ),
+                      const SizedBox(height: 20),
+                      Text(
+                        "Bem-vindo!",
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 40),
 
-                      // CAMPO DE EMAIL COM VALIDADOR
+                      // 2. EMAIL
                       CustomInput(
                         controller: emailController,
                         label: "Email",
@@ -291,39 +380,56 @@ class _MainAppState extends State<MainApp> {
                         keyboardType: TextInputType.emailAddress,
                         obscureText: false,
                         validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Por favor, insira seu email.';
-                          }
+                          if (value == null || value.isEmpty)
+                            return 'O e-mail não pode ser vazio.';
                           if (!value.contains('@') || !value.contains('.')) {
-                            return 'Email inválido. Verifique o formato.';
+                            return 'Formato de e-mail inválido.';
                           }
                           return null;
                         },
                       ),
                       const SizedBox(height: 16),
 
-                      // CAMPO DE SENHA COM VALIDADOR
+                      // 3. SENHA
                       CustomInput(
                         controller: passwordController,
                         label: "Senha",
-                        hint: 'senha',
+                        hint: '******',
                         obscureText: true,
                         keyboardType: TextInputType.text,
                         validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Por favor, insira sua senha.';
-                          }
-                          if (value.length < 6) {
-                            return 'A senha deve ter no mínimo 6 caracteres.';
-                          }
+                          if (value == null || value.isEmpty)
+                            return 'A senha não pode ser vazia.';
+                          if (value.length < 6)
+                            return 'A senha deve ter pelo menos 6 caracteres.';
                           return null;
                         },
                       ),
-                      const SizedBox(height: 20),
 
-                      // BOTÃO ENTRAR
+                      // 4. ESQUECEU A SENHA
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: () => _resetPassword(innerContext),
+                          style: TextButton.styleFrom(
+                            padding: EdgeInsets.zero,
+                            minimumSize: const Size(50, 30),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          child: const Text(
+                            'Esqueceu a senha?',
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 24),
+
+                      // 5. BOTÃO ENTRAR
                       CustomButton(
                         buttonText: "Entrar",
+                        backgroundColor: Colors.blue,
                         onPressed: () async {
                           if (_formKey.currentState!.validate()) {
                             try {
@@ -333,41 +439,50 @@ class _MainAppState extends State<MainApp> {
                               );
                               if (!mounted) return;
                               _showSnackBar(
-                                innerContext, //
-                                "Login bem-sucedido!",
+                                innerContext,
+                                "Login realizado!",
                                 isError: false,
                               );
                             } on AuthException catch (e) {
                               if (mounted) {
                                 _showSnackBar(
-                                  innerContext, //
-                                  "Falha no Login: ${e.message}",
+                                  innerContext,
+                                  "Erro: ${e.message}",
                                   isError: true,
                                 );
                               }
                             } catch (e) {
                               if (mounted) {
                                 _showSnackBar(
-                                  innerContext, //
-                                  "Erro inesperado. Verifique sua conexão.",
+                                  innerContext,
+                                  "Erro inesperado.",
                                   isError: true,
                                 );
-                              } else {
-                                debugPrint('login error: $e');
                               }
                             }
                           }
+                          // Se não validar, os campos já mostrarão o erro vermelho
                         },
-                        backgroundColor: Colors.blue,
                       ),
-                      const SizedBox(height: 12),
 
-                      // BOTÃO CADASTRAR
+                      const SizedBox(height: 16),
+
+                      // 6. CADASTRAR
                       CustomTextButton(
-                        buttonText: "Cadastrar",
+                        buttonText: "Criar nova conta",
                         onPressed: () {
                           if (_formKey.currentState!.validate()) {
-                            _cadastrarUsuario(innerContext); //
+                            _cadastrarUsuario(innerContext);
+                          } else {
+                            // Opcional: se quiser que o erro só apareça nos campos, remova este if
+                            if (emailController.text.isEmpty ||
+                                passwordController.text.isEmpty) {
+                              _showSnackBar(
+                                innerContext,
+                                "Preencha os campos para cadastrar.",
+                                isError: true,
+                              );
+                            }
                           }
                         },
                       ),
@@ -383,48 +498,8 @@ class _MainAppState extends State<MainApp> {
   }
 }
 
-// Extensões e Widgets Auxiliares
+// Extensão para evitar erros de linter
 extension on RealtimePresence {
   Future<void> untrack() async {}
   Future<void> track(Map<String, Object?> map) async {}
-}
-
-class MessageReactions extends StatefulWidget {
-  final void Function(String reaction)? onReact;
-  const MessageReactions({super.key, this.onReact});
-  @override
-  State<MessageReactions> createState() => _MessageReactionsState();
-}
-
-class _MessageReactionsState extends State<MessageReactions> {
-  String? selectedReaction;
-  final List<String> reactions = ['👍', '❤️', '😂', '😮', '😢'];
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: reactions.map((r) {
-        final isSelected = r == selectedReaction;
-        return GestureDetector(
-          onTap: () {
-            setState(() {
-              selectedReaction = r;
-            });
-            if (widget.onReact != null) widget.onReact!(r);
-          },
-          child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 4),
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: isSelected
-                  ? Colors.blue.withAlpha(51)
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(r, style: const TextStyle(fontSize: 20)),
-          ),
-        );
-      }).toList(),
-    );
-  }
 }
