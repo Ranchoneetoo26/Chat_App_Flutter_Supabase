@@ -5,10 +5,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
 import 'package:intl/intl.dart';
 import 'package:file_picker/file_picker.dart';
-import '../../main.dart'; // Para acessar a instância global do Supabase
+import '../../main.dart'; 
 import '../../services/chat_service.dart';
 import 'search_page.dart';
-import 'profile_page.dart'; // Importar a página de perfil
+import 'profile_page.dart';
+import '../widgets/message_reactions.dart';
 import 'conversations_page.dart';
 
 class ChatPage extends StatefulWidget {
