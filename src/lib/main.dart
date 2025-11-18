@@ -262,9 +262,34 @@ class _MainAppState extends State<MainApp> {
       valueListenable: themeNotifier,
       builder: (context, currentMode, _) {
         return StreamBuilder<AuthState>(
+          // ...
           stream: supabase.auth.onAuthStateChange,
           builder: (context, snapshot) {
-            final loggedIn = snapshot.data?.session != null;
+            final authState = snapshot.data;
+
+            // --- 💡 INÍCIO DA CORREÇÃO 💡 ---
+
+            // 1. Verificamos se o evento é de recuperação de senha PRIMEIRO
+            if (authState?.event == AuthChangeEvent.passwordRecovery) {
+              // Se for, ignore o "loggedIn" e vá direto para a página de update
+              return MaterialApp(
+                navigatorKey: navigatorKey,
+                debugShowCheckedModeBanner: false,
+                themeMode: currentMode,
+                theme: ThemeData(
+                  // ... (seu tema claro) ...
+                ),
+                darkTheme: ThemeData(
+                  // ... (seu tema escuro) ...
+                ),
+                home: const UpdatePasswordPage(), // <-- Ponto principal da correção
+              );
+            }
+
+            // 2. Se não for recuperação, aí sim checamos se está logado
+            final loggedIn = authState?.session != null;
+            
+            // --- FIM DA CORREÇÃO 💡 ---
 
             return MaterialApp(
               // Conectando a chave global aqui
@@ -319,6 +344,7 @@ class _MainAppState extends State<MainApp> {
               home: loggedIn ? const ConversationsPage() : _buildLoginScreen(),
             );
           },
+// ...
         );
       },
     );
