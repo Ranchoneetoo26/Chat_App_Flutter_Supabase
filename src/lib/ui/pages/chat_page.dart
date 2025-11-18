@@ -412,9 +412,9 @@ class _ChatPageState extends State<ChatPage> {
                         : '?';
 
                     final msgId = msg['id'].toString();
-                    final time = DateFormat('HH:mm').format(
-                      DateTime.parse(msg['created_at']).toLocal(),
-                    );
+                    final time = DateFormat(
+                      'HH:mm',
+                    ).format(DateTime.parse(msg['created_at']));
 
                     final mediaUrl = msg['media_url']?.toString();
                     final isImage = mediaUrl != null && mediaUrl.isNotEmpty;
