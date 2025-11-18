@@ -214,8 +214,9 @@ class _ConversationsPageState extends State<ConversationsPage> {
                       child: ElevatedButton(
                         onPressed: () async {
                           final query = searchController.text.trim();
-                          if (query.isEmpty && !isGroup)
+                          if (query.isEmpty && !isGroup) {
                             return; // Se não for grupo, precisa buscar alguém
+                          }
 
                           // Adiciona try/catch para mostrar erros
                           try {

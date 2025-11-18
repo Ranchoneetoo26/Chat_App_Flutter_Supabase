@@ -10,8 +10,8 @@ import '../../services/chat_service.dart';
 import 'search_page.dart';
 import 'profile_page.dart';
 import 'conversations_page.dart';
-// Importa o widget de reações (necessário para o pop-up)
-import '../widgets/message_reactions.dart'; 
+import '../widgets/custom_drawer.dart';
+import '../widgets/message_reactions.dart';
 
 class ChatPage extends StatefulWidget {
   final String? conversationId;
@@ -175,8 +175,8 @@ class _ChatPageState extends State<ChatPage> {
         'sender_id': currentUser.id,
         'content_text': '',
         'conversation_id': convId,
-        'media_url': url, // 
-        'media_type': f.extension ?? 'file', // 
+        'media_url': url, //
+        'media_type': f.extension ?? 'file', //
         'created_at': DateTime.now().toIso8601String(),
       });
 
@@ -192,7 +192,6 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  // ================= PRESENCE / TYPING HELPERS =================
   void _setupPresenceSubscription() {
     _presenceChannel = supabase.channel(kPresenceChannelName);
     final presence = _presenceChannel.presence;
@@ -208,16 +207,14 @@ class _ChatPageState extends State<ChatPage> {
             final userId = key.toString();
             final presList = (value is List) ? value : [value];
             for (final p in presList) {
-              // bool hidden = false; // REMOVIDO
               String? status;
               if (p is Map) {
-                // hidden = (p['hide_status'] as bool?) ?? false; // REMOVIDO
                 status = p['status']?.toString();
               } else {
                 status = p.toString();
               }
 
-              online.add(userId); // CORRIGIDO (removido 'if !hidden')
+              online.add(userId);
               if (status == 'typing') typing.add(userId);
               _loadUserName(userId);
             }
@@ -245,7 +242,7 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> _removePresenceSubscription() async {
     try {
       // ##### CORREÇÃO: Chamada no canal, não no presence #####
-      await _presenceChannel.untrack(); // 
+      await _presenceChannel.untrack(); //
     } catch (e) {
       debugPrint('untrack error: $e');
     }
@@ -263,11 +260,12 @@ class _ChatPageState extends State<ChatPage> {
     try {
       // if (_isStatusHidden) { // REMOVIDO
       //   await _presenceChannel.untrack();
-      //   return; 
-      // } 
+      //   return;
+      // }
 
       // ##### CORREÇÃO: Chamada no canal e remoção de 'hide_status' #####
-      await _presenceChannel.track({ // 
+      await _presenceChannel.track({
+        //
         'user_id': currentUser.id,
         'status': typing ? 'typing' : 'online',
         // 'hide_status': _isStatusHidden, // REMOVIDO
@@ -282,7 +280,7 @@ class _ChatPageState extends State<ChatPage> {
     _typingTimer?.cancel();
     _trackUserStatus(typing: true);
     // ##### CORREÇÃO: kTypDelay -> kTypingDelay #####
-    _typingTimer = Timer(kTypingDelay, () { 
+    _typingTimer = Timer(kTypingDelay, () {
       _trackUserStatus(typing: false);
     });
   }
@@ -294,28 +292,30 @@ class _ChatPageState extends State<ChatPage> {
     try {
       final res = await supabase
           .from('profiles')
-          .select('id, username, full_name, email, avatar_url') // 1. Pedimos o avatar_url
+          .select(
+            'id, username, full_name, email, avatar_url',
+          ) // 1. Pedimos o avatar_url
           .eq('id', userId)
           .maybeSingle();
 
       if (res != null) {
         // --- Lógica de Nome (igual a antes) ---
-        final name = (res['full_name'] ?? res['username'] ?? res['email'] ?? '').toString();
+        final name = (res['full_name'] ?? res['username'] ?? res['email'] ?? '')
+            .toString();
         _userNames[userId] = name.isNotEmpty ? name : userId;
 
         // --- 💡 LÓGICA NOVA PARA FOTO 💡 ---
         final avatarPath = res['avatar_url'] as String?;
-        
+
         if (avatarPath != null && avatarPath.isNotEmpty) {
           try {
             // 2. Criamos a URL assinada (válida por 1 hora)
             final signedUrl = await supabase.storage
                 .from('profile_pictures') // Nome do seu bucket de fotos
                 .createSignedUrl(avatarPath, 3600);
-            
+
             // 3. Salvamos a URL no cache
             _avatarUrls[userId] = signedUrl;
-
           } catch (e) {
             debugPrint('Erro ao gerar URL assinada para $userId: $e');
             _avatarUrls[userId] = ''; // Salva vazio se der erro
@@ -330,7 +330,7 @@ class _ChatPageState extends State<ChatPage> {
     } catch (e) {
       debugPrint('loadUserName error: $e');
       // Marcamos como "buscado" para não tentar de novo
-      _userNames[userId] = 'Usuário...'; 
+      _userNames[userId] = 'Usuário...';
       _avatarUrls[userId] = '';
     }
   }
@@ -429,16 +429,17 @@ class _ChatPageState extends State<ChatPage> {
         .from('message_reactions') // 1. Tabela
         .stream(primaryKey: ['id']) // 2. Stream
         .eq('message_id', messageId) // 3. Filtro
-        .listen((list) { // 4. Listen
-      final Map<String, int> agg = {};
-      for (final row in list) {
-        final r = (row['reaction'] ?? '').toString();
-        if (r.isEmpty) continue;
-        agg[r] = (agg[r] ?? 0) + 1;
-      }
-      _messageReactions[messageId] = agg;
-      if (mounted) setState(() {});
-    }, onError: (e) => debugPrint('reaction stream error: $e'));
+        .listen((list) {
+          // 4. Listen
+          final Map<String, int> agg = {};
+          for (final row in list) {
+            final r = (row['reaction'] ?? '').toString();
+            if (r.isEmpty) continue;
+            agg[r] = (agg[r] ?? 0) + 1;
+          }
+          _messageReactions[messageId] = agg;
+          if (mounted) setState(() {});
+        }, onError: (e) => debugPrint('reaction stream error: $e'));
 
     _reactionSubs[messageId] = sub;
   }
@@ -512,70 +513,18 @@ class _ChatPageState extends State<ChatPage> {
         ],
       ),
 
-      // 1. ADICIONANDO DRAWER (MENU LATERAL)
-      drawer: Drawer(
-        child: ListView(
-          padding: EdgeInsets.zero,
-          children: <Widget>[
-            const DrawerHeader(
-              decoration: BoxDecoration(color: Colors.blue),
-              child: Text(
-                'Menu',
-                style: TextStyle(color: Colors.white, fontSize: 24),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.person),
-              title: const Text('Meu Perfil'),
-              onTap: () {
-                Navigator.pop(context); // Fecha o Drawer
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (context) => const ProfilePage()),
-                );
-              },
-            ),
-            // ##### REMOVIDO SwitchListTile para 'hide_status' #####
-            ListTile(
-              leading: const Icon(Icons.chat),
-              title: const Text('Conversas'),
-              onTap: () {
-                Navigator.pop(context);
-                // Evita empilhar a mesma tela
-                Navigator.of(context).pushReplacement(
-                  MaterialPageRoute(builder: (_) => const ConversationsPage()),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.logout),
-              title: const Text('Sair'),
-              onTap: () async {
-                Navigator.pop(context); // Fecha o Drawer
-                await supabase.auth.signOut();
-                // O main.dart cuida do redirecionamento
-              },
-            ),
-          ],
-        ),
-      ),
+      drawer: const CustomDrawer(),
 
       body: Column(
         children: [
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
-              
-              // ########## INÍCIO DA CORREÇÃO (ORDEM DO STREAM) ##########
-              // A sintaxe correta para stream COM join é diferente
               stream: supabase
                   .from('messages')
                   .stream(primaryKey: ['id'])
-                  .eq(
-                    'conversation_id',
-                    widget.conversationId!,
-                  )
+                  .eq('conversation_id', widget.conversationId!)
                   .order('created_at', ascending: true)
                   .map((data) => List<Map<String, dynamic>>.from(data as List)),
-              // ########## FIM DA CORREÇÃO ##########
 
               builder: (_, snapshot) {
                 if (snapshot.hasError) {
@@ -614,33 +563,28 @@ class _ChatPageState extends State<ChatPage> {
                   ),
                   itemCount: messages.length,
                   itemBuilder: (_, i) {
-                  final msg = messages[i];
-                  // 1. Pegamos o ID do remetente
-                  final senderId = msg['sender_id']?.toString();
+                    final msg = messages[i];
+                    // 1. Pegamos o ID do remetente
+                    final senderId = msg['sender_id']?.toString();
 
-                  // --- 💡 CORREÇÃO APLICADA AQUI 💡 ---
-                  // 2. Verificamos se o ID existe e mandamos carregar o nome
-                  if (senderId != null) {
-                    _loadUserName(senderId);
-                  }
-                  // --- FIM DA CORREÇÃO ---
+                    if (senderId != null) {
+                      _loadUserName(senderId);
+                    }
 
-                  // 3. O resto do seu código continua, agora usando a variável 'senderId'
-                  final userName =
-                      _userNames[senderId] ?? 'Usuário...';
+                    final userName = _userNames[senderId] ?? 'Usuário...';
 
-                  final mine = senderId == currentUser?.id;
-                  final initials = userName.isNotEmpty
-                      ? userName.substring(0, 1).toUpperCase()
-                      : '?';
+                    final mine = senderId == currentUser?.id;
+                    final initials = userName.isNotEmpty
+                        ? userName.substring(0, 1).toUpperCase()
+                        : '?';
 
-                  final time = DateFormat(
-                    'HH:mm',
-                  ).format(DateTime.parse(msg['created_at']));
+                    final time = DateFormat(
+                      'HH:mm',
+                    ).format(DateTime.parse(msg['created_at']));
 
-                  final msgId = msg['id']?.toString() ?? '';
-                  _fetchReactions(msgId);
-                  _ensureReactionSubscription(msgId);
+                    final msgId = msg['id']?.toString() ?? '';
+                    _fetchReactions(msgId);
+                    _ensureReactionSubscription(msgId);
 
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -654,16 +598,21 @@ class _ChatPageState extends State<ChatPage> {
                           if (!mine)
                             CircleAvatar(
                               backgroundColor: Colors.blueAccent,
-                              
-                              backgroundImage: _avatarUrls[senderId] != null && _avatarUrls[senderId]!.isNotEmpty
+
+                              backgroundImage:
+                                  _avatarUrls[senderId] != null &&
+                                      _avatarUrls[senderId]!.isNotEmpty
                                   ? NetworkImage(_avatarUrls[senderId]!)
                                   : null, // Sem imagem
-                              
                               // Mostra as iniciais APENAS se não houver foto
-                              child: (_avatarUrls[senderId] == null || _avatarUrls[senderId]!.isEmpty)
-                                  ? Text( 
+                              child:
+                                  (_avatarUrls[senderId] == null ||
+                                      _avatarUrls[senderId]!.isEmpty)
+                                  ? Text(
                                       initials,
-                                      style: const TextStyle(color: Colors.white),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                      ),
                                     )
                                   : null,
                             ),
@@ -866,7 +815,6 @@ class _ChatPageState extends State<ChatPage> {
             ),
           ),
 
-          // CAMPO DE INPUT DE MENSAGEM
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             color: Colors.white,
@@ -959,6 +907,4 @@ class _ChatPageState extends State<ChatPage> {
       ),
     );
   }
-  
-  // ##### FUNÇÕES DE 'hide_status' REMOVIDAS #####
 }
