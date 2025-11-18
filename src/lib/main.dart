@@ -7,13 +7,10 @@ import 'package:app/ui/widgets/custom_input.dart';
 import 'package:app/ui/widgets/custom_text_button.dart';
 import 'package:app/ui/pages/conversations_page.dart';
 
-// --- 1. CONTROLE GLOBAL DE TEMA E NAVEGAÇÃO ---
 final themeNotifier = ValueNotifier<ThemeMode>(ThemeMode.dark);
 
-// Instância global do cliente Supabase
 final supabase = Supabase.instance.client;
 
-// Chave global para navegação sem contexto
 final navigatorKey = GlobalKey<NavigatorState>();
 
 const String kPresenceChannelName = 'online_users';
@@ -22,7 +19,6 @@ const Duration kTypingDelay = Duration(seconds: 3);
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Inicialização do Supabase
   await Supabase.initialize(
     url: 'https://ihsluigtpkgasyknldsa.supabase.co',
     anonKey:
@@ -40,16 +36,13 @@ class MainApp extends StatefulWidget {
 }
 
 class _MainAppState extends State<MainApp> {
-  // Controladores de texto
   final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
 
-  // Estado de presença e autenticação
   late RealtimeChannel _presenceChannel;
   String? _currentUserId;
 
-  // Variáveis de status
   final bool _isTyping = false;
   Timer? _typingTimer;
   final bool _isStatusHidden = false;
@@ -59,7 +52,7 @@ class _MainAppState extends State<MainApp> {
   void initState() {
     super.initState();
     _initSupabaseAuthListener();
-    // Tenta configurar presença se já houver usuário logado
+
     if (supabase.auth.currentUser != null) {
       _currentUserId = supabase.auth.currentUser!.id;
       _setupPresenceSubscription();
@@ -74,8 +67,6 @@ class _MainAppState extends State<MainApp> {
     _typingTimer?.cancel();
     super.dispose();
   }
-
-  // --- Funções de Auxílio de UI ---
 
   void _showSnackBar(
     BuildContext context,
@@ -92,16 +83,12 @@ class _MainAppState extends State<MainApp> {
     }
   }
 
-  // --- Lógica do Supabase e Presença ---
-
   void _initSupabaseAuthListener() {
-    // Adicionado async para suportar o delay
     supabase.auth.onAuthStateChange.listen((data) async {
       final event = data.event;
       final session = data.session;
 
       if (event == AuthChangeEvent.passwordRecovery) {
-        // 🟢 CORREÇÃO 1: Delay para garantir que o App carregou antes de navegar
         await Future.delayed(const Duration(seconds: 1));
 
         navigatorKey.currentState?.push(
@@ -195,8 +182,6 @@ class _MainAppState extends State<MainApp> {
     }
   }
 
-  // --- Lógica de Autenticação (Login, Cadastro, Reset) ---
-
   Future<void> _cadastrarUsuario(BuildContext context) async {
     final email = emailController.text.trim();
     final pass = passwordController.text.trim();
@@ -236,7 +221,6 @@ class _MainAppState extends State<MainApp> {
     }
 
     try {
-      // 🟢 CORREÇÃO 2: redirectTo no lugar certo
       await supabase.auth.resetPasswordForEmail(
         email,
         redirectTo: 'http://localhost:3000',
@@ -254,8 +238,6 @@ class _MainAppState extends State<MainApp> {
     }
   }
 
-  // --- Interface Visual ---
-
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<ThemeMode>(
@@ -267,39 +249,25 @@ class _MainAppState extends State<MainApp> {
           builder: (context, snapshot) {
             final authState = snapshot.data;
 
-            // --- 💡 INÍCIO DA CORREÇÃO 💡 ---
-
-            // 1. Verificamos se o evento é de recuperação de senha PRIMEIRO
             if (authState?.event == AuthChangeEvent.passwordRecovery) {
-              // Se for, ignore o "loggedIn" e vá direto para a página de update
               return MaterialApp(
                 navigatorKey: navigatorKey,
                 debugShowCheckedModeBanner: false,
                 themeMode: currentMode,
-                theme: ThemeData(
-                  // ... (seu tema claro) ...
-                ),
-                darkTheme: ThemeData(
-                  // ... (seu tema escuro) ...
-                ),
-                home: const UpdatePasswordPage(), // <-- Ponto principal da correção
+                theme: ThemeData(),
+                darkTheme: ThemeData(),
+                home: const UpdatePasswordPage(),
               );
             }
 
-            // 2. Se não for recuperação, aí sim checamos se está logado
             final loggedIn = authState?.session != null;
-            
-            // --- FIM DA CORREÇÃO 💡 ---
 
             return MaterialApp(
-              // Conectando a chave global aqui
               navigatorKey: navigatorKey,
               debugShowCheckedModeBanner: false,
 
-              // --- CONFIGURAÇÃO DE TEMAS ---
               themeMode: currentMode,
 
-              // Tema Claro
               theme: ThemeData(
                 brightness: Brightness.light,
                 primarySwatch: Colors.blue,
@@ -318,7 +286,6 @@ class _MainAppState extends State<MainApp> {
                 ),
               ),
 
-              // Tema Escuro
               darkTheme: ThemeData(
                 brightness: Brightness.dark,
                 primarySwatch: Colors.blue,
@@ -344,7 +311,7 @@ class _MainAppState extends State<MainApp> {
               home: loggedIn ? const ConversationsPage() : _buildLoginScreen(),
             );
           },
-// ...
+          // ...
         );
       },
     );
@@ -352,7 +319,6 @@ class _MainAppState extends State<MainApp> {
 
   Widget _buildLoginScreen() {
     return Scaffold(
-      // Botão de Tema Flutuante (Sol/Lua)
       floatingActionButton: FloatingActionButton(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -386,7 +352,6 @@ class _MainAppState extends State<MainApp> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // 1. LOGO
                       const Icon(
                         Icons.chat_bubble_outline,
                         size: 100,
@@ -403,7 +368,6 @@ class _MainAppState extends State<MainApp> {
                       ),
                       const SizedBox(height: 40),
 
-                      // 2. EMAIL
                       CustomInput(
                         controller: emailController,
                         label: "Email",
@@ -422,7 +386,6 @@ class _MainAppState extends State<MainApp> {
                       ),
                       const SizedBox(height: 16),
 
-                      // 3. SENHA
                       CustomInput(
                         controller: passwordController,
                         label: "Senha",
@@ -440,7 +403,6 @@ class _MainAppState extends State<MainApp> {
                         },
                       ),
 
-                      // 4. ESQUECEU A SENHA
                       const SizedBox(height: 8),
                       Align(
                         alignment: Alignment.centerRight,
@@ -460,7 +422,6 @@ class _MainAppState extends State<MainApp> {
 
                       const SizedBox(height: 24),
 
-                      // 5. BOTÃO ENTRAR
                       CustomButton(
                         buttonText: "Entrar",
                         backgroundColor: Colors.blue,
@@ -500,7 +461,6 @@ class _MainAppState extends State<MainApp> {
 
                       const SizedBox(height: 16),
 
-                      // 6. CADASTRAR
                       CustomTextButton(
                         buttonText: "Criar nova conta",
                         onPressed: () {
@@ -530,7 +490,6 @@ class _MainAppState extends State<MainApp> {
   }
 }
 
-// Extensão para evitar erros de linter
 extension on RealtimePresence {
   Future<void> untrack() async {}
   Future<void> track(Map<String, Object?> map) async {}

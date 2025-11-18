@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-// Certifique-se que os caminhos dos imports estão corretos no seu projeto
 import '../../main.dart';
 import '../pages/profile_page.dart';
 import '../pages/conversations_page.dart';
@@ -16,7 +15,6 @@ class CustomDrawer extends StatefulWidget {
 class _CustomDrawerState extends State<CustomDrawer> {
   final supabase = Supabase.instance.client;
 
-  // Variáveis de estado para exibir na UI
   String? _avatarUrl;
   String _userName = "Carregando...";
   String _userEmail = "";
@@ -27,7 +25,6 @@ class _CustomDrawerState extends State<CustomDrawer> {
     _loadProfile();
   }
 
-  /// Busca os dados do perfil no Supabase para preencher o cabeçalho
   Future<void> _loadProfile() async {
     final user = supabase.auth.currentUser;
     if (user == null) return;
@@ -37,7 +34,6 @@ class _CustomDrawerState extends State<CustomDrawer> {
     });
 
     try {
-      // Busca nome e caminho da foto na tabela 'profiles'
       final data = await supabase
           .from('profiles')
           .select('full_name, avatar_url')
@@ -50,12 +46,11 @@ class _CustomDrawerState extends State<CustomDrawer> {
         _userName = data['full_name'] ?? "Usuário";
       });
 
-      // Se tiver foto, gera a URL assinada
       final avatarPath = data['avatar_url'] as String?;
       if (avatarPath != null && avatarPath.isNotEmpty) {
         final url = await supabase.storage
             .from('profile_pictures')
-            .createSignedUrl(avatarPath, 3600); // URL válida por 1h
+            .createSignedUrl(avatarPath, 3600);
 
         if (mounted) {
           setState(() {
@@ -71,11 +66,9 @@ class _CustomDrawerState extends State<CustomDrawer> {
   @override
   Widget build(BuildContext context) {
     return Drawer(
-      // O Drawer agora respeita o tema do sistema (sem cor de fundo fixa)
       child: ListView(
         padding: EdgeInsets.zero,
         children: [
-          // --- CABEÇALHO AZUL ---
           UserAccountsDrawerHeader(
             decoration: const BoxDecoration(color: Colors.blue),
             accountName: Text(
@@ -85,7 +78,7 @@ class _CustomDrawerState extends State<CustomDrawer> {
             accountEmail: Text(_userEmail),
             currentAccountPicture: CircleAvatar(
               backgroundColor: Colors.white,
-              // Se tiver URL, usa NetworkImage, senão usa ícone padrão
+
               backgroundImage: _avatarUrl != null && _avatarUrl!.isNotEmpty
                   ? NetworkImage(_avatarUrl!)
                   : null,
@@ -95,25 +88,23 @@ class _CustomDrawerState extends State<CustomDrawer> {
             ),
           ),
 
-          // --- ITEM: MEU PERFIL ---
           ListTile(
             leading: const Icon(Icons.person),
             title: const Text('Meu Perfil'),
             onTap: () {
-              Navigator.pop(context); // Fecha o menu
+              Navigator.pop(context);
               Navigator.of(context).push(
                 MaterialPageRoute(builder: (context) => const ProfilePage()),
               );
             },
           ),
 
-          // --- ITEM: CONVERSAS ---
           ListTile(
             leading: const Icon(Icons.chat_bubble),
             title: const Text('Conversas'),
             onTap: () {
               Navigator.pop(context);
-              // Substitui a rota para não empilhar conversas sobre conversas
+
               Navigator.of(context).pushReplacement(
                 MaterialPageRoute(builder: (_) => const ConversationsPage()),
               );
@@ -122,7 +113,6 @@ class _CustomDrawerState extends State<CustomDrawer> {
 
           const Divider(),
 
-          // --- ITEM: MODO ESCURO ---
           ValueListenableBuilder<ThemeMode>(
             valueListenable: themeNotifier,
             builder: (_, mode, __) {
@@ -143,7 +133,6 @@ class _CustomDrawerState extends State<CustomDrawer> {
 
           const Divider(),
 
-          // --- ITEM: SAIR ---
           ListTile(
             leading: const Icon(Icons.exit_to_app, color: Colors.redAccent),
             title: const Text(
@@ -151,13 +140,10 @@ class _CustomDrawerState extends State<CustomDrawer> {
               style: TextStyle(color: Colors.redAccent),
             ),
             onTap: () async {
-              // 1. Fecha o Drawer visualmente
               Navigator.pop(context);
 
-              // 2. Volta a navegação até a raiz (evita erro de tela vermelha)
               Navigator.of(context).popUntil((route) => route.isFirst);
 
-              // 3. Desloga do Supabase
               await supabase.auth.signOut();
             },
           ),

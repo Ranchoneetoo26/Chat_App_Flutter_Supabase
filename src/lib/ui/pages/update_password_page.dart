@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-// Import para voltar para conversas ou home depois
+
 import 'conversations_page.dart';
 
 class UpdatePasswordPage extends StatefulWidget {
@@ -27,7 +27,6 @@ class _UpdatePasswordPageState extends State<UpdatePasswordPage> {
 
     setState(() => _loading = true);
     try {
-      // Essa é a função que atualiza a senha do usuário LOGADO
       await Supabase.instance.client.auth.updateUser(
         UserAttributes(password: newPassword),
       );
@@ -36,7 +35,7 @@ class _UpdatePasswordPageState extends State<UpdatePasswordPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Senha atualizada com sucesso!')),
         );
-        // Redireciona para a área principal do app
+
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => const ConversationsPage()),
         );

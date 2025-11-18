@@ -27,7 +27,6 @@ class ChatService {
     });
   }
 
-  /// Atualiza o conteúdo de uma mensagem (somente texto).
   Future<void> updateMessage({
     required String messageId,
     required String newText,
@@ -41,19 +40,15 @@ class ChatService {
         .eq('id', messageId);
   }
 
-  /// Remove uma mensagem (apagar)
   Future<void> deleteMessage({required String messageId}) async {
     await _client.from('messages').delete().eq('id', messageId);
   }
 
-  /// Adiciona ou atualiza a reação de um usuário para uma mensagem (toggle semantics).
   Future<void> addReaction({
     required String messageId,
     required String userId,
     required String reaction,
   }) async {
-    // Insere ou atualiza (upsert) a reação. A tabela `message_reactions` deve
-    // ter unique constraint em (message_id, user_id).
     await _client.from('message_reactions').upsert({
       'message_id': messageId,
       'user_id': userId,
@@ -62,7 +57,6 @@ class ChatService {
     });
   }
 
-  /// Remove a reação de um usuário para uma mensagem
   Future<void> removeReaction({
     required String messageId,
     required String userId,
@@ -73,7 +67,6 @@ class ChatService {
     });
   }
 
-  /// Retorna um mapa de reação -> contagem para uma mensagem
   Future<Map<String, int>> getReactionsAggregated(String messageId) async {
     final res = await _client
         .from('message_reactions')
@@ -91,7 +84,6 @@ class ChatService {
     return out;
   }
 
-  /// Stream em tempo real das reações de uma determinada mensagem
   Stream<List<Map<String, dynamic>>> streamReactions(String messageId) {
     return _client
         .from('message_reactions')
@@ -101,10 +93,8 @@ class ChatService {
         .map((data) => List<Map<String, dynamic>>.from(data as List));
   }
 
-  /// Faz upload de um anexo para o bucket `attachments` e retorna a URL pública.
-  /// Aceita os bytes do arquivo e o nome original para compor o caminho.
   Future<String> uploadAttachment(Uint8List bytes, String filename) async {
-    const maxBytes = 20 * 1024 * 1024; // 20MB
+    const maxBytes = 20 * 1024 * 1024;
     if (bytes.length > maxBytes) {
       throw Exception('Arquivo maior que 20MB.');
     }
@@ -113,12 +103,10 @@ class ChatService {
     final key = 'uploads/${DateTime.now().millisecondsSinceEpoch}_$filename';
 
     try {
-      // Tenta usar uploadBinary (disponível nas versões recentes do SDK).
       final storage = _client.storage.from(bucket);
       try {
         await storage.uploadBinary(key, bytes);
       } catch (e) {
-        // Se uploadBinary não estiver disponível ou falhar, logamos e rethrow
         debugPrint('uploadBinary failed: $e');
         rethrow;
       }

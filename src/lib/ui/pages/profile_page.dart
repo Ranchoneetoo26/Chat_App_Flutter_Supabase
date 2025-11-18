@@ -1,5 +1,3 @@
-// lib/ui/pages/profile_page.dart
-
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -19,7 +17,7 @@ class _ProfilePageState extends State<ProfilePage> {
   final _fullNameController = TextEditingController();
 
   bool _isLoading = true;
-  String _profileImageUrl = ''; // Guarda a URL assinada
+  String _profileImageUrl = '';
   String _initialUsername = '';
   String _initialFullName = '';
 
@@ -33,10 +31,7 @@ class _ProfilePageState extends State<ProfilePage> {
     _loadProfile();
   }
 
-  // --- Funções de Lógica ---
-
   Future<void> _loadProfile() async {
-    // Garante que o estado de loading esteja ativo ao carregar
     if (!_isLoading) {
       if (mounted) setState(() => _isLoading = true);
     }
@@ -44,7 +39,7 @@ class _ProfilePageState extends State<ProfilePage> {
     try {
       final response = await supabase
           .from('profiles')
-          .select('username, full_name, avatar_url') // avatar_url é o CAMINHO
+          .select('username, full_name, avatar_url')
           .eq('id', currentUserId)
           .single();
 
@@ -55,19 +50,17 @@ class _ProfilePageState extends State<ProfilePage> {
 
       final avatarPath = response['avatar_url'] as String?;
 
-      // Limpa a URL antiga antes de buscar uma nova
       if (mounted) setState(() => _profileImageUrl = '');
 
       if (avatarPath != null && avatarPath.isNotEmpty) {
         try {
-          // Gera a URL assinada (válida por 1 hora)
           final signedUrl = await supabase.storage
               .from('profile_pictures')
               .createSignedUrl(avatarPath, 3600);
 
           if (mounted) {
             setState(() {
-              _profileImageUrl = signedUrl; // Salva a URL assinada
+              _profileImageUrl = signedUrl;
             });
           }
         } catch (e) {
@@ -107,8 +100,11 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Future<void> _updateProfile() async {
     if (_usernameController.text.isEmpty || _fullNameController.text.isEmpty) {
-      _showSnackBar(context, 'Nome de usuário e nome completo são obrigatórios.',
-          isError: true);
+      _showSnackBar(
+        context,
+        'Nome de usuário e nome completo são obrigatórios.',
+        isError: true,
+      );
       return;
     }
 
@@ -122,10 +118,15 @@ class _ProfilePageState extends State<ProfilePage> {
         newAvatarPath = '$currentUserId/profile.$fileExtension';
         final imageBytes = await imageFile.readAsBytes();
 
-        await supabase.storage.from('profile_pictures').uploadBinary(
+        await supabase.storage
+            .from('profile_pictures')
+            .uploadBinary(
               newAvatarPath,
               imageBytes,
-              fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
+              fileOptions: const FileOptions(
+                cacheControl: '3600',
+                upsert: true,
+              ),
             );
       }
 
@@ -147,19 +148,17 @@ class _ProfilePageState extends State<ProfilePage> {
       if (!mounted) return;
       _showSnackBar(context, 'Perfil atualizado com sucesso!', isError: false);
 
-      // Limpa a imagem local para forçar o recarregamento
       setState(() {
         _selectedImage = null;
       });
 
-      // Recarrega o perfil para obter a *nova* URL assinada
       await _loadProfile();
     } catch (e) {
       debugPrint('updateProfile error: $e');
       if (mounted) {
         _showSnackBar(context, 'Erro ao atualizar perfil: $e', isError: true);
       }
-      setState(() => _isLoading = false); // Garante que o loading pare em caso de erro
+      setState(() => _isLoading = false);
     }
   }
 
@@ -176,8 +175,6 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  // --- Métodos de Build ---
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -189,7 +186,7 @@ class _ProfilePageState extends State<ProfilePage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  _buildProfileImage(), // O widget do avatar
+                  _buildProfileImage(),
                   const SizedBox(height: 30),
                   TextFormField(
                     controller: _usernameController,
@@ -206,7 +203,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                   const SizedBox(height: 30),
                   ElevatedButton(
-                    onPressed: _isLoading ? null : _updateProfile, // Desativa se estiver carregando
+                    onPressed: _isLoading ? null : _updateProfile,
                     child: const Text('Salvar Alterações'),
                   ),
                 ],
@@ -215,7 +212,6 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  /// Widget para Imagem de Perfil (Versão com correção da Asserção)
   Widget _buildProfileImage() {
     final hasLocalImage = _selectedImage != null;
     final hasRemoteImage = _profileImageUrl.isNotEmpty;
@@ -227,10 +223,10 @@ class _ProfilePageState extends State<ProfilePage> {
     String? imageKey;
 
     if (hasLocalImage) {
-      backgroundImage = NetworkImage(_selectedImage!.path); // Blob local
+      backgroundImage = NetworkImage(_selectedImage!.path);
       imageKey = _selectedImage!.path;
     } else if (hasRemoteImage) {
-      backgroundImage = NetworkImage(_profileImageUrl); // URL Assinada do Supabase
+      backgroundImage = NetworkImage(_profileImageUrl);
       imageKey = _profileImageUrl;
     } else {
       backgroundImage = null;
@@ -240,14 +236,11 @@ class _ProfilePageState extends State<ProfilePage> {
       alignment: Alignment.center,
       children: [
         CircleAvatar(
-          // A Key força o Flutter a recriar este widget quando a URL mudar,
-          // vencendo o cache do navegador.
           key: ValueKey<String>(imageKey ?? 'no_image'),
           radius: 60,
           backgroundColor: Colors.blueGrey,
           backgroundImage: backgroundImage,
 
-          // CORREÇÃO: Só adiciona o manipulador de erro SE houver uma imagem
           onBackgroundImageError: backgroundImage != null
               ? (exception, stackTrace) {
                   debugPrint("Erro ao carregar imagem: $exception");
@@ -255,9 +248,8 @@ class _ProfilePageState extends State<ProfilePage> {
                     setState(() => _profileImageUrl = '');
                   }
                 }
-              : null, // Se não há imagem, não há manipulador de erro
+              : null,
 
-          // O 'child' (iniciais) só aparece se o 'backgroundImage' for nulo
           child: (backgroundImage == null)
               ? Text(
                   initials,
@@ -265,7 +257,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 )
               : null,
         ),
-        // Ícone de Câmera/Edição
+
         Positioned(
           bottom: 0,
           right: 0,

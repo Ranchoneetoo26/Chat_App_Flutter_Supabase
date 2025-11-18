@@ -28,7 +28,6 @@ class _SearchPageState extends State<SearchPage> {
     final query = q.trim();
     if (query.isEmpty) return;
 
-    // Tokenize and normalize input
     final tokens = query
         .toLowerCase()
         .split(RegExp(r"\s+"))
@@ -66,7 +65,6 @@ class _SearchPageState extends State<SearchPage> {
           }
         }
 
-        // Build sorted results by score (higher relevance first)
         final sorted = byId.keys.toList()
           ..sort((a, b) {
             final sa = score[a] ?? 0;
@@ -128,7 +126,6 @@ class _SearchPageState extends State<SearchPage> {
         });
       }
     } catch (e) {
-      // ignore errors; UI shows empty
     } finally {
       if (mounted) {
         setState(() {

@@ -2,9 +2,8 @@ import 'package:app/ui/widgets/custom_drawer.dart';
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../main.dart';
 import 'chat_page.dart';
-import 'profile_page.dart'; 
+
 class ConversationsPage extends StatefulWidget {
   const ConversationsPage({super.key});
 
@@ -47,7 +46,7 @@ class _ConversationsPageState extends State<ConversationsPage> {
     if (currentUser == null) return;
     try {
       _membersSub = sup
-          .from('participants') // Corrigido
+          .from('participants')
           .stream(primaryKey: ['id'])
           .eq('user_id', currentUser.id)
           .listen(
@@ -81,7 +80,7 @@ class _ConversationsPageState extends State<ConversationsPage> {
       }
 
       final members = await sup
-          .from('participants') // Corrigido
+          .from('participants')
           .select('conversation_id')
           .eq('user_id', currentUser.id);
 
@@ -100,16 +99,15 @@ class _ConversationsPageState extends State<ConversationsPage> {
       final res = await sup
           .from('conversations')
           .select(
-            'id, group_name, is_group, is_public, created_at, updated_at, created_by', // Corrigido
+            'id, group_name, is_group, is_public, created_at, updated_at, created_by',
           )
-          .filter('id', 'in', idList) // Corrigido
+          .filter('id', 'in', idList)
           .order('updated_at', ascending: false);
 
       _convs = List<Map<String, dynamic>>.from(res as List);
     } catch (e) {
       debugPrint('Erro ao carregar conversas: $e');
       if (mounted) {
-        // Mostra o erro real
         String errorMessage = 'Erro ao carregar: $e';
         if (e is PostgrestException) {
           errorMessage = 'Erro do Banco: ${e.message}';
@@ -134,14 +132,13 @@ class _ConversationsPageState extends State<ConversationsPage> {
     );
   }
 
-  // --- Lógica Completa de Criar Conversa (CORRIGIDA) ---
   void _showCreateDialog() {
     final currentUser = sup.auth.currentUser;
     if (currentUser == null) return;
 
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true, // Para o teclado não cobrir o modal
+      isScrollControlled: true,
       builder: (ctx) {
         final TextEditingController searchController = TextEditingController();
         final TextEditingController nameController = TextEditingController();
@@ -150,7 +147,7 @@ class _ConversationsPageState extends State<ConversationsPage> {
 
         return Padding(
           padding: EdgeInsets.only(
-            bottom: MediaQuery.of(ctx).viewInsets.bottom, // Ajuste teclado
+            bottom: MediaQuery.of(ctx).viewInsets.bottom,
           ),
           child: StatefulBuilder(
             builder: (ctx, setState) {
@@ -213,19 +210,16 @@ class _ConversationsPageState extends State<ConversationsPage> {
                         onPressed: () async {
                           final query = searchController.text.trim();
                           if (query.isEmpty && !isGroup) {
-                            return; // Se não for grupo, precisa buscar alguém
+                            return;
                           }
 
-                          // Adiciona try/catch para mostrar erros
                           try {
                             Map<String, dynamic>? otherUser;
                             if (query.isNotEmpty) {
                               final res = await sup
                                   .from('profiles')
                                   .select('id, email, username')
-                                  .or(
-                                    'email.eq."$query",username.eq."$query"',
-                                  ) // Corrigido
+                                  .or('email.eq."$query",username.eq."$query"')
                                   .maybeSingle();
 
                               if (res == null && !isGroup) {
@@ -245,7 +239,6 @@ class _ConversationsPageState extends State<ConversationsPage> {
                                 ? otherUser['id']
                                 : null;
 
-                            // 1. Conversa Privada (1:1)
                             if (!isGroup) {
                               if (otherId == null) return;
                               if (otherId == currentUser.id) {
@@ -266,19 +259,16 @@ class _ConversationsPageState extends State<ConversationsPage> {
                                     otherId,
                                   );
                               if (!mounted) return;
-                              Navigator.pop(ctx); // Fecha modal
+                              Navigator.pop(ctx);
                               _openConversation(convId);
                               return;
                             }
 
-                            // 2. Criar Grupo
                             final created = await sup
                                 .from('conversations')
                                 .insert({
                                   'group_name':
-                                      nameController.text
-                                          .trim()
-                                          .isEmpty // Corrigido
+                                      nameController.text.trim().isEmpty
                                       ? 'Novo Grupo'
                                       : nameController.text.trim(),
                                   'is_group': true,
@@ -293,7 +283,6 @@ class _ConversationsPageState extends State<ConversationsPage> {
                             if (created != null) {
                               final convId = created['id'];
                               await sup.from('participants').insert([
-                                // Corrigido
                                 {
                                   'conversation_id': convId,
                                   'user_id': currentUser.id,
@@ -302,7 +291,6 @@ class _ConversationsPageState extends State<ConversationsPage> {
                               if (otherId != null &&
                                   otherId != currentUser.id) {
                                 await sup.from('participants').insert([
-                                  // Corrigido
                                   {
                                     'conversation_id': convId,
                                     'user_id': otherId,
@@ -314,7 +302,6 @@ class _ConversationsPageState extends State<ConversationsPage> {
                               _openConversation(convId);
                             }
                           } catch (e) {
-                            // Se qualquer coisa falhar, mostra o erro
                             String errorMessage = 'Erro ao criar: $e';
                             if (e is PostgrestException) {
                               errorMessage = 'Erro do Banco: ${e.message}';
@@ -341,15 +328,14 @@ class _ConversationsPageState extends State<ConversationsPage> {
     );
   }
 
-  // --- Lógica de Achar ou Criar (CORRIGIDA) ---
   Future<String> _findOrCreatePrivateConversation(String a, String b) async {
     try {
       final resA = await sup
-          .from('participants') // Corrigido
+          .from('participants')
           .select('conversation_id')
           .eq('user_id', a);
       final resB = await sup
-          .from('participants') // Corrigido
+          .from('participants')
           .select('conversation_id')
           .eq('user_id', b);
 
@@ -369,12 +355,12 @@ class _ConversationsPageState extends State<ConversationsPage> {
         final convs = await sup
             .from('conversations')
             .select('id')
-            .filter('id', 'in', idList) // Corrigido
+            .filter('id', 'in', idList)
             .eq('is_group', false);
 
         final convsList = convs as List? ?? [];
         if (convsList.isNotEmpty) {
-          return convsList.first['id'].toString(); // Retorna chat 1:1 existente
+          return convsList.first['id'].toString();
         }
       }
     } catch (e) {
@@ -382,7 +368,6 @@ class _ConversationsPageState extends State<ConversationsPage> {
       throw Exception('Falha ao buscar conversas existentes: $e');
     }
 
-    // Se não achou, cria nova
     try {
       final created = await sup
           .from('conversations')
@@ -397,7 +382,6 @@ class _ConversationsPageState extends State<ConversationsPage> {
       if (convId == null) throw Exception('Failed to create conversation');
 
       await sup.from('participants').insert([
-        // Corrigido
         {'conversation_id': convId, 'user_id': a},
         {'conversation_id': convId, 'user_id': b},
       ]);
@@ -420,22 +404,18 @@ class _ConversationsPageState extends State<ConversationsPage> {
         child: _loading
             ? const Center(child: CircularProgressIndicator())
             : _convs.isEmpty
-            ? const Center(
-                child: Text("Nenhuma conversa ainda."),
-              ) // Mensagem de lista vazia
+            ? const Center(child: Text("Nenhuma conversa ainda."))
             : ListView.builder(
                 itemCount: _convs.length,
                 itemBuilder: (_, i) {
                   final c = _convs[i];
                   final title = (c['is_group'] == true)
-                      ? (c['group_name'] ?? 'Grupo') // Corrigido
-                      : (c['group_name'] ?? 'Conversa'); // Corrigido
+                      ? (c['group_name'] ?? 'Grupo')
+                      : (c['group_name'] ?? 'Conversa');
 
                   return ListTile(
                     leading: Icon(
-                      c['is_group'] == true
-                          ? Icons.group
-                          : Icons.person, // Ícone de grupo/pessoa
+                      c['is_group'] == true ? Icons.group : Icons.person,
                     ),
                     title: Text(title),
                     subtitle: Text(

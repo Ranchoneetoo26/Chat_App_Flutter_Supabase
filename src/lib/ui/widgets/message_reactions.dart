@@ -17,7 +17,7 @@ class _MessageReactionsState extends State<MessageReactions> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
-      color: isDark ? Colors.grey[900] : Colors.white, // Ajuste para o tema
+      color: isDark ? Colors.grey[900] : Colors.white,
       padding: const EdgeInsets.all(16),
       child: Row(
         mainAxisSize: MainAxisSize.min,

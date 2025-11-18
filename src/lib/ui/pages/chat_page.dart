@@ -4,7 +4,6 @@ import 'dart:async';
 import 'package:intl/intl.dart';
 import 'package:file_picker/file_picker.dart';
 
-// --- SEUS IMPORTS ---
 import '../../main.dart';
 import '../../services/chat_service.dart';
 import 'search_page.dart';
@@ -25,20 +24,17 @@ class _ChatPageState extends State<ChatPage> {
   final ChatService _chatService = ChatService();
   final supabase = Supabase.instance.client;
 
-  // Presença / typing
   late RealtimeChannel _presenceChannel;
   Set<String> _onlineUsers = {};
   Set<String> _typingUsers = {};
   Timer? _typingTimer;
 
-  // Cache de dados de usuário
   final Map<String, String> _avatarUrls = {};
   final Map<String, String> _userNames = {};
 
   bool _isSending = false;
   String? _editingMessageId;
 
-  // Cache de reações
   final Map<String, Map<String, int>> _messageReactions = {};
   final Map<String, StreamSubscription> _reactionSubs = {};
 
@@ -46,7 +42,7 @@ class _ChatPageState extends State<ChatPage> {
   void initState() {
     super.initState();
     _setupPresenceSubscription();
-    _markMessagesAsRead(); // Marca mensagens como lidas ao entrar
+    _markMessagesAsRead();
   }
 
   @override
@@ -58,13 +54,11 @@ class _ChatPageState extends State<ChatPage> {
     super.dispose();
   }
 
-  // --- FUNÇÃO: MARCAR COMO LIDO ---
   Future<void> _markMessagesAsRead() async {
     final currentUser = supabase.auth.currentUser;
     if (currentUser == null || widget.conversationId == null) return;
 
     try {
-      // Atualiza todas as mensagens que NÃO são minhas para is_read = true
       await supabase
           .from('messages')
           .update({'is_read': true})
@@ -91,7 +85,6 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  // --- ENVIO DE MENSAGEM DE TEXTO ---
   Future<void> _sendMessage() async {
     final text = messageController.text.trim();
     if (text.isEmpty) return;
@@ -100,7 +93,6 @@ class _ChatPageState extends State<ChatPage> {
     if (currentUser == null) return;
     final convId = widget.conversationId!;
 
-    // Lógica de Edição
     if (_editingMessageId != null) {
       final editId = _editingMessageId!;
       try {
@@ -117,7 +109,6 @@ class _ChatPageState extends State<ChatPage> {
       return;
     }
 
-    // Envio Normal
     setState(() => _isSending = true);
 
     try {
@@ -125,7 +116,6 @@ class _ChatPageState extends State<ChatPage> {
           .sendMessage(convId, currentUser.id, text)
           .timeout(const Duration(seconds: 2));
     } on TimeoutException {
-      // Envio em background se demorar
       _chatService.sendMessage(convId, currentUser.id, text);
     } catch (e) {
       if (mounted) _showSnackBar(context, 'Erro no envio.', isError: true);
@@ -137,7 +127,6 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  // --- UPLOAD DE ARQUIVO ---
   Future<void> _pickAndUploadAttachment() async {
     try {
       final result = await FilePicker.platform.pickFiles(withData: true);
@@ -145,7 +134,6 @@ class _ChatPageState extends State<ChatPage> {
 
       final f = result.files.first;
       if (f.size > 20 * 1024 * 1024) {
-        // 20MB limit
         if (mounted) _showSnackBar(context, 'Arquivo > 20MB.', isError: true);
         return;
       }
@@ -159,7 +147,7 @@ class _ChatPageState extends State<ChatPage> {
 
       await supabase.from('messages').insert({
         'sender_id': currentUser.id,
-        'content_text': '', // Vazio pois é imagem
+        'content_text': '',
         'conversation_id': widget.conversationId!,
         'media_url': url,
         'media_type': f.extension ?? 'file',
@@ -177,7 +165,6 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  // --- PRESENÇA ---
   void _setupPresenceSubscription() {
     _presenceChannel = supabase.channel(kPresenceChannelName);
     final presence = _presenceChannel.presence;
@@ -244,7 +231,6 @@ class _ChatPageState extends State<ChatPage> {
     });
   }
 
-  // --- PERFIL E AVATAR ---
   Future<void> _loadUserName(String userId) async {
     if (_userNames.containsKey(userId)) return;
 
@@ -275,7 +261,6 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  // --- CRUD MENSAGENS ---
   Future<void> _startEditing(String msgId, String text, String? created) async {
     if (created != null) {
       final dt = DateTime.tryParse(created);
@@ -300,7 +285,6 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  // --- REAÇÕES ---
   Future<void> _onReact(String msgId, String reaction) async {
     final user = supabase.auth.currentUser;
     if (user == null) return;
@@ -340,7 +324,9 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _cancelAllReactionSubscriptions() async {
-    for (final s in _reactionSubs.values) await s.cancel();
+    for (final s in _reactionSubs.values) {
+      await s.cancel();
+    }
     _reactionSubs.clear();
   }
 
@@ -356,14 +342,10 @@ class _ChatPageState extends State<ChatPage> {
     });
   }
 
-  // =======================================================================
-  //                                  BUILD
-  // =======================================================================
   @override
   Widget build(BuildContext context) {
     final currentUser = supabase.auth.currentUser;
 
-    // 1. PROTEÇÃO: Se usuário nulo, retorna loading para evitar crash
     if (currentUser == null) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
@@ -371,7 +353,6 @@ class _ChatPageState extends State<ChatPage> {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      // Removido backgroundColor fixo para respeitar o tema
       appBar: AppBar(
         title: const Text("Chat"),
         actions: [
@@ -402,10 +383,12 @@ class _ChatPageState extends State<ChatPage> {
                   .order('created_at', ascending: true)
                   .map((data) => List<Map<String, dynamic>>.from(data)),
               builder: (_, snapshot) {
-                if (snapshot.hasError)
+                if (snapshot.hasError) {
                   return Center(child: Text('Erro: ${snapshot.error}'));
-                if (!snapshot.hasData)
+                }
+                if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
+                }
 
                 final messages = snapshot.data!;
                 if (messages.isNotEmpty) _scrollToBottom();
@@ -433,7 +416,6 @@ class _ChatPageState extends State<ChatPage> {
                       'HH:mm',
                     ).format(DateTime.parse(msg['created_at']));
 
-                    // Dados para imagem
                     final mediaUrl = msg['media_url']?.toString();
                     final isImage = mediaUrl != null && mediaUrl.isNotEmpty;
 
@@ -448,7 +430,6 @@ class _ChatPageState extends State<ChatPage> {
                             ? MainAxisAlignment.end
                             : MainAxisAlignment.start,
                         children: [
-                          // 2. AVATAR (Esquerda se for Outro)
                           if (!mine) ...[
                             _buildAvatar(senderId, initials),
                             const SizedBox(width: 8),
@@ -460,20 +441,18 @@ class _ChatPageState extends State<ChatPage> {
                                   ? CrossAxisAlignment.end
                                   : CrossAxisAlignment.start,
                               children: [
-                                // Nome
                                 Text(
                                   mine ? "Você" : userName,
                                   style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.bold,
-                                    // 3. Cor ajustável ao tema
+
                                     color: isDarkMode
                                         ? Colors.white
                                         : Colors.black87,
                                   ),
                                 ),
 
-                                // Balão da Mensagem
                                 GestureDetector(
                                   onLongPress: () =>
                                       _showContextMenu(context, msg, mine),
@@ -491,7 +470,7 @@ class _ChatPageState extends State<ChatPage> {
                                           : Colors.grey.shade300,
                                       borderRadius: BorderRadius.circular(16),
                                     ),
-                                    // 4. Lógica Imagem vs Texto
+
                                     child: isImage
                                         ? ClipRRect(
                                             borderRadius: BorderRadius.circular(
@@ -534,7 +513,6 @@ class _ChatPageState extends State<ChatPage> {
                                   ),
                                 ),
 
-                                // Reações
                                 if (_messageReactions[msgId]?.isNotEmpty ??
                                     false)
                                   Padding(
@@ -570,7 +548,6 @@ class _ChatPageState extends State<ChatPage> {
                                     ),
                                   ),
 
-                                // Horário + Checks
                                 Padding(
                                   padding: const EdgeInsets.only(top: 2),
                                   child: Row(
@@ -581,22 +558,21 @@ class _ChatPageState extends State<ChatPage> {
                                         time,
                                         style: TextStyle(
                                           fontSize: 10,
-                                          // Cor ajustável ao tema
+
                                           color: isDarkMode
                                               ? Colors.white70
                                               : Colors.grey,
                                         ),
                                       ),
-                                      // 5. CHECKS (Visto/Enviado) - Só se for MINHA
+
                                       if (mine) ...[
                                         const SizedBox(width: 4),
                                         Icon(
                                           msg['is_read'] == true
-                                              ? Icons
-                                                    .done_all // Dois riscos
-                                              : Icons.check, // Um risco
+                                              ? Icons.done_all
+                                              : Icons.check,
                                           size: 14,
-                                          // Azul se lido, Cor do tema se não
+
                                           color: msg['is_read'] == true
                                               ? Colors.blue
                                               : (isDarkMode
@@ -611,7 +587,6 @@ class _ChatPageState extends State<ChatPage> {
                             ),
                           ),
 
-                          // 2. AVATAR (Direita se for Eu)
                           if (mine) ...[
                             const SizedBox(width: 8),
                             _buildAvatar(senderId, initials),
@@ -625,7 +600,6 @@ class _ChatPageState extends State<ChatPage> {
             ),
           ),
 
-          // INPUT AREA
           Container(
             padding: const EdgeInsets.all(8),
             color: isDarkMode ? Colors.black12 : Colors.white,
@@ -684,7 +658,6 @@ class _ChatPageState extends State<ChatPage> {
             ),
           ),
 
-          // "Digitando..."
           if (_typingUsers.isNotEmpty)
             Padding(
               padding: const EdgeInsets.all(8.0),
@@ -705,7 +678,6 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  // Widget auxiliar do Avatar
   Widget _buildAvatar(String? userId, String initials) {
     final url = _avatarUrls[userId];
     return CircleAvatar(
