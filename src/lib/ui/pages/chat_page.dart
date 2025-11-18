@@ -653,9 +653,8 @@ class _ChatPageState extends State<ChatPage> {
                             CircleAvatar(
                               backgroundColor: Colors.blueAccent,
                               
-                              // --- 💡 LÓGICA NOVA DA FOTO 💡 ---
                               backgroundImage: _avatarUrls[senderId] != null && _avatarUrls[senderId]!.isNotEmpty
-                                  ? NetworkImage(_avatarUrls[senderId]!) // Usa a URL assinada
+                                  ? NetworkImage(_avatarUrls[senderId]!)
                                   : null, // Sem imagem
                               
                               // Mostra as iniciais APENAS se não houver foto
@@ -667,7 +666,6 @@ class _ChatPageState extends State<ChatPage> {
                                   : null,
                             ),
                           const SizedBox(width: 8),
-// ...
                           Flexible(
                             child: Column(
                               crossAxisAlignment: mine
