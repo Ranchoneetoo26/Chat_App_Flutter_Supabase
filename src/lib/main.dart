@@ -8,12 +8,12 @@ import 'package:app/ui/widgets/custom_text_button.dart';
 import 'package:app/ui/pages/conversations_page.dart';
 
 // --- 1. CONTROLE GLOBAL DE TEMA E NAVEGAÇÃO ---
-final themeNotifier = ValueNotifier<ThemeMode>(ThemeMode.system);
+final themeNotifier = ValueNotifier<ThemeMode>(ThemeMode.dark);
 
 // Instância global do cliente Supabase
 final supabase = Supabase.instance.client;
 
-// 🔴 CORREÇÃO: Chave global para navegação sem contexto
+// Chave global para navegação sem contexto
 final navigatorKey = GlobalKey<NavigatorState>();
 
 const String kPresenceChannelName = 'online_users';
@@ -95,12 +95,15 @@ class _MainAppState extends State<MainApp> {
   // --- Lógica do Supabase e Presença ---
 
   void _initSupabaseAuthListener() {
-    supabase.auth.onAuthStateChange.listen((data) {
+    // Adicionado async para suportar o delay
+    supabase.auth.onAuthStateChange.listen((data) async {
       final event = data.event;
       final session = data.session;
 
       if (event == AuthChangeEvent.passwordRecovery) {
-        // 🔴 CORREÇÃO: Usando navigatorKey para navegar
+        // 🟢 CORREÇÃO 1: Delay para garantir que o App carregou antes de navegar
+        await Future.delayed(const Duration(seconds: 1));
+
         navigatorKey.currentState?.push(
           MaterialPageRoute(builder: (_) => const UpdatePasswordPage()),
         );
@@ -227,13 +230,18 @@ class _MainAppState extends State<MainApp> {
       _showSnackBar(
         context,
         'Por favor, digite seu email no campo acima para recuperar a senha.',
-        isError: true, // Mostra em vermelho para alertar
+        isError: true,
       );
       return;
     }
 
     try {
-      await supabase.auth.resetPasswordForEmail(email);
+      // 🟢 CORREÇÃO 2: redirectTo no lugar certo
+      await supabase.auth.resetPasswordForEmail(
+        email,
+        redirectTo: 'http://localhost:3000',
+      );
+
       if (!mounted) return;
       _showSnackBar(
         context,
@@ -250,7 +258,6 @@ class _MainAppState extends State<MainApp> {
 
   @override
   Widget build(BuildContext context) {
-    // O ValueListenableBuilder "ouve" as mudanças no themeNotifier
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: themeNotifier,
       builder: (context, currentMode, _) {
@@ -285,7 +292,7 @@ class _MainAppState extends State<MainApp> {
             // --- FIM DA CORREÇÃO 💡 ---
 
             return MaterialApp(
-              // 🔴 CORREÇÃO: Conectando a chave global aqui
+              // Conectando a chave global aqui
               navigatorKey: navigatorKey,
               debugShowCheckedModeBanner: false,
 
@@ -375,13 +382,11 @@ class _MainAppState extends State<MainApp> {
 
                 return Form(
                   key: _formKey,
-                  // 🔴 MÁGICA: Valida assim que o usuário interage
                   autovalidateMode: AutovalidateMode.onUserInteraction,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       // 1. LOGO
-                      // Se tiver imagem: Image.asset('assets/images/logo.png', height: 120),
                       const Icon(
                         Icons.chat_bubble_outline,
                         size: 100,
@@ -406,8 +411,9 @@ class _MainAppState extends State<MainApp> {
                         keyboardType: TextInputType.emailAddress,
                         obscureText: false,
                         validator: (value) {
-                          if (value == null || value.isEmpty)
+                          if (value == null || value.isEmpty) {
                             return 'O e-mail não pode ser vazio.';
+                          }
                           if (!value.contains('@') || !value.contains('.')) {
                             return 'Formato de e-mail inválido.';
                           }
@@ -424,10 +430,12 @@ class _MainAppState extends State<MainApp> {
                         obscureText: true,
                         keyboardType: TextInputType.text,
                         validator: (value) {
-                          if (value == null || value.isEmpty)
+                          if (value == null || value.isEmpty) {
                             return 'A senha não pode ser vazia.';
-                          if (value.length < 6)
+                          }
+                          if (value.length < 6) {
                             return 'A senha deve ter pelo menos 6 caracteres.';
+                          }
                           return null;
                         },
                       ),
@@ -487,7 +495,6 @@ class _MainAppState extends State<MainApp> {
                               }
                             }
                           }
-                          // Se não validar, os campos já mostrarão o erro vermelho
                         },
                       ),
 
@@ -500,7 +507,6 @@ class _MainAppState extends State<MainApp> {
                           if (_formKey.currentState!.validate()) {
                             _cadastrarUsuario(innerContext);
                           } else {
-                            // Opcional: se quiser que o erro só apareça nos campos, remova este if
                             if (emailController.text.isEmpty ||
                                 passwordController.text.isEmpty) {
                               _showSnackBar(

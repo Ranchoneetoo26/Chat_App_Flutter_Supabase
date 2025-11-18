@@ -1,12 +1,10 @@
+import 'package:app/ui/widgets/custom_drawer.dart';
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
-// IMPORT CORRIGIDO (caminho correto)
 import '../../main.dart';
 import 'chat_page.dart';
-import 'profile_page.dart'; // Importação do Perfil
-
+import 'profile_page.dart'; 
 class ConversationsPage extends StatefulWidget {
   const ConversationsPage({super.key});
 
@@ -108,7 +106,6 @@ class _ConversationsPageState extends State<ConversationsPage> {
           .order('updated_at', ascending: false);
 
       _convs = List<Map<String, dynamic>>.from(res as List);
-
     } catch (e) {
       debugPrint('Erro ao carregar conversas: $e');
       if (mounted) {
@@ -117,10 +114,9 @@ class _ConversationsPageState extends State<ConversationsPage> {
         if (e is PostgrestException) {
           errorMessage = 'Erro do Banco: ${e.message}';
         }
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(errorMessage),
-          backgroundColor: Colors.red,
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(errorMessage), backgroundColor: Colors.red),
+        );
       }
     }
 
@@ -216,8 +212,9 @@ class _ConversationsPageState extends State<ConversationsPage> {
                       child: ElevatedButton(
                         onPressed: () async {
                           final query = searchController.text.trim();
-                          if (query.isEmpty && !isGroup)
+                          if (query.isEmpty && !isGroup) {
                             return; // Se não for grupo, precisa buscar alguém
+                          }
 
                           // Adiciona try/catch para mostrar erros
                           try {
@@ -226,7 +223,9 @@ class _ConversationsPageState extends State<ConversationsPage> {
                               final res = await sup
                                   .from('profiles')
                                   .select('id, email, username')
-                                  .or('email.eq."$query",username.eq."$query"') // Corrigido
+                                  .or(
+                                    'email.eq."$query",username.eq."$query"',
+                                  ) // Corrigido
                                   .maybeSingle();
 
                               if (res == null && !isGroup) {
@@ -252,7 +251,9 @@ class _ConversationsPageState extends State<ConversationsPage> {
                               if (otherId == currentUser.id) {
                                 ScaffoldMessenger.of(ctx).showSnackBar(
                                   const SnackBar(
-                                    content: Text('Você não pode criar uma conversa com você mesmo.'),
+                                    content: Text(
+                                      'Você não pode criar uma conversa com você mesmo.',
+                                    ),
                                     backgroundColor: Colors.red,
                                   ),
                                 );
@@ -261,9 +262,9 @@ class _ConversationsPageState extends State<ConversationsPage> {
 
                               final convId =
                                   await _findOrCreatePrivateConversation(
-                                currentUser.id,
-                                otherId,
-                              );
+                                    currentUser.id,
+                                    otherId,
+                                  );
                               if (!mounted) return;
                               Navigator.pop(ctx); // Fecha modal
                               _openConversation(convId);
@@ -274,28 +275,38 @@ class _ConversationsPageState extends State<ConversationsPage> {
                             final created = await sup
                                 .from('conversations')
                                 .insert({
-                                  'group_name': nameController.text.trim().isEmpty // Corrigido
+                                  'group_name':
+                                      nameController.text
+                                          .trim()
+                                          .isEmpty // Corrigido
                                       ? 'Novo Grupo'
                                       : nameController.text.trim(),
                                   'is_group': true,
                                   'is_public': isPublic,
                                   'created_by': currentUser.id,
-                                  'created_at': DateTime.now().toIso8601String(),
+                                  'created_at': DateTime.now()
+                                      .toIso8601String(),
                                 })
                                 .select()
                                 .maybeSingle();
 
                             if (created != null) {
                               final convId = created['id'];
-                              await sup.from('participants').insert([ // Corrigido
+                              await sup.from('participants').insert([
+                                // Corrigido
                                 {
                                   'conversation_id': convId,
                                   'user_id': currentUser.id,
                                 },
                               ]);
-                              if (otherId != null && otherId != currentUser.id) {
-                                await sup.from('participants').insert([ // Corrigido
-                                  {'conversation_id': convId, 'user_id': otherId},
+                              if (otherId != null &&
+                                  otherId != currentUser.id) {
+                                await sup.from('participants').insert([
+                                  // Corrigido
+                                  {
+                                    'conversation_id': convId,
+                                    'user_id': otherId,
+                                  },
                                 ]);
                               }
                               if (!mounted) return;
@@ -385,7 +396,8 @@ class _ConversationsPageState extends State<ConversationsPage> {
       final convId = created == null ? null : created['id'];
       if (convId == null) throw Exception('Failed to create conversation');
 
-      await sup.from('participants').insert([ // Corrigido
+      await sup.from('participants').insert([
+        // Corrigido
         {'conversation_id': convId, 'user_id': a},
         {'conversation_id': convId, 'user_id': b},
       ]);
@@ -401,68 +413,38 @@ class _ConversationsPageState extends State<ConversationsPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('Conversas')),
 
-      drawer: Drawer(
-        child: ListView(
-          padding: EdgeInsets.zero,
-          children: <Widget>[
-            const DrawerHeader(
-              decoration: BoxDecoration(color: Colors.blue),
-              child: Text(
-                'Menu',
-                style: TextStyle(color: Colors.white, fontSize: 24),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.person),
-              title: const Text('Meu Perfil'),
-              onTap: () {
-                Navigator.pop(context); // Fecha o Drawer
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (context) => const ProfilePage()),
-                );
-              },
-            ),
-            
-            // Código do "theme_notifier" removido
-            
-            ListTile(
-              leading: const Icon(Icons.logout),
-              title: const Text('Sair'),
-              onTap: () async {
-                Navigator.pop(context); // Fecha o Drawer
-                await sup.auth.signOut();
-              },
-            ),
-          ],
-        ),
-      ),
+      drawer: const CustomDrawer(),
 
       body: RefreshIndicator(
         onRefresh: _loadConversations,
         child: _loading
             ? const Center(child: CircularProgressIndicator())
             : _convs.isEmpty
-                ? const Center(child: Text("Nenhuma conversa ainda.")) // Mensagem de lista vazia
-                : ListView.builder(
-                    itemCount: _convs.length,
-                    itemBuilder: (_, i) {
-                      final c = _convs[i];
-                      final title = (c['is_group'] == true)
-                          ? (c['group_name'] ?? 'Grupo') // Corrigido
-                          : (c['group_name'] ?? 'Conversa'); // Corrigido
+            ? const Center(
+                child: Text("Nenhuma conversa ainda."),
+              ) // Mensagem de lista vazia
+            : ListView.builder(
+                itemCount: _convs.length,
+                itemBuilder: (_, i) {
+                  final c = _convs[i];
+                  final title = (c['is_group'] == true)
+                      ? (c['group_name'] ?? 'Grupo') // Corrigido
+                      : (c['group_name'] ?? 'Conversa'); // Corrigido
 
-                      return ListTile(
-                        leading: Icon(
-                          c['is_group'] == true ? Icons.group : Icons.person, // Ícone de grupo/pessoa
-                        ),
-                        title: Text(title),
-                        subtitle: Text(
-                          (c['is_public'] == true) ? 'Público' : 'Privado',
-                        ),
-                        onTap: () => _openConversation(c['id']),
-                      );
-                    },
-                  ),
+                  return ListTile(
+                    leading: Icon(
+                      c['is_group'] == true
+                          ? Icons.group
+                          : Icons.person, // Ícone de grupo/pessoa
+                    ),
+                    title: Text(title),
+                    subtitle: Text(
+                      (c['is_public'] == true) ? 'Público' : 'Privado',
+                    ),
+                    onTap: () => _openConversation(c['id']),
+                  );
+                },
+              ),
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: _showCreateDialog,
