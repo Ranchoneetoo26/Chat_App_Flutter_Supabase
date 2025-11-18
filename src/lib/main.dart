@@ -8,7 +8,7 @@ import 'package:app/ui/widgets/custom_text_button.dart';
 import 'package:app/ui/pages/conversations_page.dart';
 
 // --- 1. CONTROLE GLOBAL DE TEMA E NAVEGAÇÃO ---
-final themeNotifier = ValueNotifier<ThemeMode>(ThemeMode.system);
+final themeNotifier = ValueNotifier<ThemeMode>(ThemeMode.dark);
 
 // Instância global do cliente Supabase
 final supabase = Supabase.instance.client;
@@ -411,8 +411,9 @@ class _MainAppState extends State<MainApp> {
                         keyboardType: TextInputType.emailAddress,
                         obscureText: false,
                         validator: (value) {
-                          if (value == null || value.isEmpty)
+                          if (value == null || value.isEmpty) {
                             return 'O e-mail não pode ser vazio.';
+                          }
                           if (!value.contains('@') || !value.contains('.')) {
                             return 'Formato de e-mail inválido.';
                           }
@@ -429,10 +430,12 @@ class _MainAppState extends State<MainApp> {
                         obscureText: true,
                         keyboardType: TextInputType.text,
                         validator: (value) {
-                          if (value == null || value.isEmpty)
+                          if (value == null || value.isEmpty) {
                             return 'A senha não pode ser vazia.';
-                          if (value.length < 6)
+                          }
+                          if (value.length < 6) {
                             return 'A senha deve ter pelo menos 6 caracteres.';
+                          }
                           return null;
                         },
                       ),

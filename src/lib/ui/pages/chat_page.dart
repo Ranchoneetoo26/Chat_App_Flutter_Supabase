@@ -93,8 +93,9 @@ class _ChatPageState extends State<ChatPage> {
         if (mounted) _showSnackBar(context, 'Mensagem editada.');
       } catch (e) {
         debugPrint('update message error: $e');
-        if (mounted)
+        if (mounted) {
           _showSnackBar(context, 'Falha ao editar: $e', isError: true);
+        }
       } finally {
         _editingMessageId = null;
         messageController.clear();
@@ -116,8 +117,9 @@ class _ChatPageState extends State<ChatPage> {
       if (mounted) _showSnackBar(context, 'Envio pendente...');
       _chatService.sendMessage(convId, currentUser.id, text).catchError((e) {
         debugPrint('background send error: $e');
-        if (mounted)
+        if (mounted) {
           _showSnackBar(context, 'Falha no envio: $e', isError: true);
+        }
       });
     } catch (e) {
       debugPrint('❌ FALHA NO ENVIO. ERRO: $e');
@@ -344,12 +346,13 @@ class _ChatPageState extends State<ChatPage> {
         if (created != null) {
           final diff = DateTime.now().difference(created);
           if (diff > const Duration(minutes: 15)) {
-            if (mounted)
+            if (mounted) {
               _showSnackBar(
                 context,
                 'Tempo de edição expirado.',
                 isError: true,
               );
+            }
             return;
           }
         }
@@ -490,7 +493,6 @@ class _ChatPageState extends State<ChatPage> {
     final currentUser = supabase.auth.currentUser;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF7FAFF),
       appBar: AppBar(
         title: const Text("Chat", style: TextStyle(color: Colors.black)),
         actions: [
