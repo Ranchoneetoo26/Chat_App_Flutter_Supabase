@@ -31,6 +31,8 @@ class _ChatPageState extends State<ChatPage> {
   Set<String> _onlineUsers = {};
   Set<String> _typingUsers = {};
   Timer? _typingTimer;
+
+  final Map<String, String> _avatarUrls = {};
   // bool _isStatusHidden = false; // REMOVIDO
   final Map<String, String> _userNames = {};
   bool _isSending = false;
@@ -284,21 +286,50 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _loadUserName(String userId) async {
+    // Se já buscamos (mesmo que falhou), não tente de novo
     if (_userNames.containsKey(userId)) return;
+
     try {
       final res = await supabase
           .from('profiles')
-          .select('id, username, full_name, email') // CORREÇÃO: Adicionado email
+          .select('id, username, full_name, email, avatar_url') // 1. Pedimos o avatar_url
           .eq('id', userId)
           .maybeSingle();
+
       if (res != null) {
-        // CORREÇÃO: Adicionado email como fallback
-        final name = (res['full_name'] ?? res['username'] ?? res['email'] ?? '').toString(); 
+        // --- Lógica de Nome (igual a antes) ---
+        final name = (res['full_name'] ?? res['username'] ?? res['email'] ?? '').toString();
         _userNames[userId] = name.isNotEmpty ? name : userId;
+
+        // --- 💡 LÓGICA NOVA PARA FOTO 💡 ---
+        final avatarPath = res['avatar_url'] as String?;
+        
+        if (avatarPath != null && avatarPath.isNotEmpty) {
+          try {
+            // 2. Criamos a URL assinada (válida por 1 hora)
+            final signedUrl = await supabase.storage
+                .from('profile_pictures') // Nome do seu bucket de fotos
+                .createSignedUrl(avatarPath, 3600);
+            
+            // 3. Salvamos a URL no cache
+            _avatarUrls[userId] = signedUrl;
+
+          } catch (e) {
+            debugPrint('Erro ao gerar URL assinada para $userId: $e');
+            _avatarUrls[userId] = ''; // Salva vazio se der erro
+          }
+        } else {
+          _avatarUrls[userId] = ''; // Salva vazio se não tiver foto
+        }
+        // --- FIM DA LÓGICA NOVA ---
+
         if (mounted) setState(() {});
       }
     } catch (e) {
       debugPrint('loadUserName error: $e');
+      // Marcamos como "buscado" para não tentar de novo
+      _userNames[userId] = 'Usuário...'; 
+      _avatarUrls[userId] = '';
     }
   }
 
@@ -581,25 +612,33 @@ class _ChatPageState extends State<ChatPage> {
                   ),
                   itemCount: messages.length,
                   itemBuilder: (_, i) {
-                    final msg = messages[i];
-                    
-                    // CORREÇÃO: Pega o nome do cache _userNames
-                    // A função _loadUserName é chamada no onSync da presença
-                    final userName =
-                        _userNames[msg['sender_id']] ?? 'Usuário...';
-                    
-                    final mine = msg['sender_id'] == currentUser?.id;
-                    final initials = userName.isNotEmpty
-                        ? userName.substring(0, 1).toUpperCase()
-                        : '?';
+                  final msg = messages[i];
+                  // 1. Pegamos o ID do remetente
+                  final senderId = msg['sender_id']?.toString();
 
-                    final time = DateFormat(
-                      'HH:mm',
-                    ).format(DateTime.parse(msg['created_at']));
+                  // --- 💡 CORREÇÃO APLICADA AQUI 💡 ---
+                  // 2. Verificamos se o ID existe e mandamos carregar o nome
+                  if (senderId != null) {
+                    _loadUserName(senderId);
+                  }
+                  // --- FIM DA CORREÇÃO ---
 
-                    final msgId = msg['id']?.toString() ?? '';
-                    _fetchReactions(msgId);
-                    _ensureReactionSubscription(msgId);
+                  // 3. O resto do seu código continua, agora usando a variável 'senderId'
+                  final userName =
+                      _userNames[senderId] ?? 'Usuário...';
+
+                  final mine = senderId == currentUser?.id;
+                  final initials = userName.isNotEmpty
+                      ? userName.substring(0, 1).toUpperCase()
+                      : '?';
+
+                  final time = DateFormat(
+                    'HH:mm',
+                  ).format(DateTime.parse(msg['created_at']));
+
+                  final msgId = msg['id']?.toString() ?? '';
+                  _fetchReactions(msgId);
+                  _ensureReactionSubscription(msgId);
 
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -609,15 +648,26 @@ class _ChatPageState extends State<ChatPage> {
                             ? MainAxisAlignment.end
                             : MainAxisAlignment.start,
                         children: [
+                          // ...
                           if (!mine)
                             CircleAvatar(
                               backgroundColor: Colors.blueAccent,
-                              child: Text(
-                                initials,
-                                style: const TextStyle(color: Colors.white),
-                              ),
+                              
+                              // --- 💡 LÓGICA NOVA DA FOTO 💡 ---
+                              backgroundImage: _avatarUrls[senderId] != null && _avatarUrls[senderId]!.isNotEmpty
+                                  ? NetworkImage(_avatarUrls[senderId]!) // Usa a URL assinada
+                                  : null, // Sem imagem
+                              
+                              // Mostra as iniciais APENAS se não houver foto
+                              child: (_avatarUrls[senderId] == null || _avatarUrls[senderId]!.isEmpty)
+                                  ? Text( 
+                                      initials,
+                                      style: const TextStyle(color: Colors.white),
+                                    )
+                                  : null,
                             ),
                           const SizedBox(width: 8),
+// ...
                           Flexible(
                             child: Column(
                               crossAxisAlignment: mine
