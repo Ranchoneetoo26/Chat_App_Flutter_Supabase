@@ -4,12 +4,10 @@ import 'dart:async';
 import 'package:intl/intl.dart';
 import 'package:file_picker/file_picker.dart';
 
-// Imports Corrigidos
+// --- SEUS IMPORTS ---
 import '../../main.dart';
 import '../../services/chat_service.dart';
 import 'search_page.dart';
-import 'profile_page.dart';
-import 'conversations_page.dart';
 import '../widgets/custom_drawer.dart';
 import '../widgets/message_reactions.dart';
 
@@ -25,6 +23,7 @@ class _ChatPageState extends State<ChatPage> {
   final TextEditingController messageController = TextEditingController();
   final ScrollController scrollController = ScrollController();
   final ChatService _chatService = ChatService();
+  final supabase = Supabase.instance.client;
 
   // Presença / typing
   late RealtimeChannel _presenceChannel;
@@ -32,19 +31,22 @@ class _ChatPageState extends State<ChatPage> {
   Set<String> _typingUsers = {};
   Timer? _typingTimer;
 
+  // Cache de dados de usuário
   final Map<String, String> _avatarUrls = {};
-  // bool _isStatusHidden = false; // REMOVIDO
   final Map<String, String> _userNames = {};
+
   bool _isSending = false;
   String? _editingMessageId;
 
-  // static const String _kDefaultConversationId = ... // REMOVIDO
+  // Cache de reações
+  final Map<String, Map<String, int>> _messageReactions = {};
+  final Map<String, StreamSubscription> _reactionSubs = {};
 
   @override
   void initState() {
     super.initState();
     _setupPresenceSubscription();
-    // _loadHideStatus(); // REMOVIDO
+    _markMessagesAsRead(); // Marca mensagens como lidas ao entrar
   }
 
   @override
@@ -56,7 +58,24 @@ class _ChatPageState extends State<ChatPage> {
     super.dispose();
   }
 
-  // --- Função Auxiliar de SnackBar ---
+  // --- FUNÇÃO: MARCAR COMO LIDO ---
+  Future<void> _markMessagesAsRead() async {
+    final currentUser = supabase.auth.currentUser;
+    if (currentUser == null || widget.conversationId == null) return;
+
+    try {
+      // Atualiza todas as mensagens que NÃO são minhas para is_read = true
+      await supabase
+          .from('messages')
+          .update({'is_read': true})
+          .eq('conversation_id', widget.conversationId!)
+          .neq('sender_id', currentUser.id)
+          .eq('is_read', false);
+    } catch (e) {
+      debugPrint('Erro ao marcar lido: $e');
+    }
+  }
+
   void _showSnackBar(
     BuildContext context,
     String message, {
@@ -72,126 +91,93 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  // =======================================================================
-  // FUNÇÃO DE ENVIO DE MENSAGEM
-  // =======================================================================
+  // --- ENVIO DE MENSAGEM DE TEXTO ---
   Future<void> _sendMessage() async {
     final text = messageController.text.trim();
     if (text.isEmpty) return;
 
     final currentUser = supabase.auth.currentUser;
     if (currentUser == null) return;
-
-    // CORREÇÃO: Usa o ID obrigatório
     final convId = widget.conversationId!;
 
-    // Editando
+    // Lógica de Edição
     if (_editingMessageId != null) {
       final editId = _editingMessageId!;
       try {
         await _chatService.updateMessage(messageId: editId, newText: text);
         if (mounted) _showSnackBar(context, 'Mensagem editada.');
       } catch (e) {
-        debugPrint('update message error: $e');
-        if (mounted) {
-          _showSnackBar(context, 'Falha ao editar: $e', isError: true);
-        }
+        if (mounted) _showSnackBar(context, 'Falha ao editar.', isError: true);
       } finally {
-        _editingMessageId = null;
-        messageController.clear();
+        setState(() {
+          _editingMessageId = null;
+          messageController.clear();
+        });
       }
       return;
     }
 
-    // Enviando nova
-    _isSending = true;
-    if (mounted) setState(() {});
+    // Envio Normal
+    setState(() => _isSending = true);
 
     try {
       await _chatService
           .sendMessage(convId, currentUser.id, text)
           .timeout(const Duration(seconds: 2));
-
-      if (mounted) _showSnackBar(context, 'Enviado');
     } on TimeoutException {
-      if (mounted) _showSnackBar(context, 'Envio pendente...');
-      _chatService.sendMessage(convId, currentUser.id, text).catchError((e) {
-        debugPrint('background send error: $e');
-        if (mounted) {
-          _showSnackBar(context, 'Falha no envio: $e', isError: true);
-        }
-      });
+      // Envio em background se demorar
+      _chatService.sendMessage(convId, currentUser.id, text);
     } catch (e) {
-      debugPrint('❌ FALHA NO ENVIO. ERRO: $e');
-      if (mounted) {
-        _showSnackBar(context, 'Falha ao enviar mensagem: $e', isError: true);
-      }
+      if (mounted) _showSnackBar(context, 'Erro no envio.', isError: true);
     } finally {
-      _isSending = false;
-      if (mounted) setState(() {});
+      if (mounted) setState(() => _isSending = false);
       messageController.clear();
       _trackUserStatus(typing: false);
       _scrollToBottom();
     }
   }
 
+  // --- UPLOAD DE ARQUIVO ---
   Future<void> _pickAndUploadAttachment() async {
     try {
       final result = await FilePicker.platform.pickFiles(withData: true);
       if (result == null || result.files.isEmpty) return;
 
       final f = result.files.first;
-      final size = f.size; // bytes
-      const maxBytes = 20 * 1024 * 1024; // 20MB
-      if (size > maxBytes) {
-        if (mounted) {
-          _showSnackBar(context, 'Arquivo maior que 20MB.', isError: true);
-        }
+      if (f.size > 20 * 1024 * 1024) {
+        // 20MB limit
+        if (mounted) _showSnackBar(context, 'Arquivo > 20MB.', isError: true);
         return;
       }
 
       final bytes = f.bytes;
-      if (bytes == null) {
-        if (mounted) {
-          _showSnackBar(
-            context,
-            'Não foi possível ler o arquivo.',
-            isError: true,
-          );
-        }
-        return;
-      }
+      if (bytes == null) return;
 
-      final filename = f.name;
-      final url = await _chatService.uploadAttachment(bytes, filename);
-
+      final url = await _chatService.uploadAttachment(bytes, f.name);
       final currentUser = supabase.auth.currentUser;
       if (currentUser == null) return;
 
-      // CORREÇÃO: Usa o ID obrigatório
-      final convId = widget.conversationId!;
-      // ##### CORREÇÃO: Usando 'media_url' e 'media_type' (do seu banco) #####
       await supabase.from('messages').insert({
         'sender_id': currentUser.id,
-        'content_text': '',
-        'conversation_id': convId,
-        'media_url': url, //
-        'media_type': f.extension ?? 'file', //
+        'content_text': '', // Vazio pois é imagem
+        'conversation_id': widget.conversationId!,
+        'media_url': url,
+        'media_type': f.extension ?? 'file',
         'created_at': DateTime.now().toIso8601String(),
+        'is_read': false,
       });
 
       if (mounted) {
-        _showSnackBar(context, 'Arquivo enviado com sucesso.');
+        _showSnackBar(context, 'Arquivo enviado!');
         _scrollToBottom();
       }
     } catch (e) {
-      debugPrint('pickAndUploadAttachment error: $e');
-      if (mounted) {
-        _showSnackBar(context, 'Falha ao enviar anexo: $e', isError: true);
-      }
+      debugPrint('Erro upload: $e');
+      if (mounted) _showSnackBar(context, 'Erro ao enviar.', isError: true);
     }
   }
 
+  // --- PRESENÇA ---
   void _setupPresenceSubscription() {
     _presenceChannel = supabase.channel(kPresenceChannelName);
     final presence = _presenceChannel.presence;
@@ -201,29 +187,19 @@ class _ChatPageState extends State<ChatPage> {
       final online = <String>{};
       final typing = <String>{};
 
-      try {
-        if (raw is Map) {
-          raw.forEach((key, value) {
-            final userId = key.toString();
-            final presList = (value is List) ? value : [value];
-            for (final p in presList) {
-              String? status;
-              if (p is Map) {
-                status = p['status']?.toString();
-              } else {
-                status = p.toString();
-              }
-
-              online.add(userId);
-              if (status == 'typing') typing.add(userId);
-              _loadUserName(userId);
-            }
-          });
-        }
-      } catch (e) {
-        debugPrint('presence.onSync parse error: $e');
+      if (raw is Map) {
+        raw.forEach((key, value) {
+          final userId = key.toString();
+          final list = (value is List) ? value : [value];
+          for (final p in list) {
+            String? status;
+            if (p is Map) status = p['status']?.toString();
+            online.add(userId);
+            if (status == 'typing') typing.add(userId);
+            _loadUserName(userId);
+          }
+        });
       }
-
       if (mounted) {
         setState(() {
           _onlineUsers = online;
@@ -241,270 +217,170 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> _removePresenceSubscription() async {
     try {
-      // ##### CORREÇÃO: Chamada no canal, não no presence #####
-      await _presenceChannel.untrack(); //
-    } catch (e) {
-      debugPrint('untrack error: $e');
-    }
+      await _presenceChannel.untrack();
+    } catch (_) {}
     try {
       await supabase.removeChannel(_presenceChannel);
-    } catch (e) {
-      debugPrint('remove channel error: $e');
-    }
+    } catch (_) {}
   }
 
   Future<void> _trackUserStatus({required bool typing}) async {
-    final currentUser = supabase.auth.currentUser;
-    if (currentUser == null) return;
-
+    final user = supabase.auth.currentUser;
+    if (user == null) return;
     try {
-      // if (_isStatusHidden) { // REMOVIDO
-      //   await _presenceChannel.untrack();
-      //   return;
-      // }
-
-      // ##### CORREÇÃO: Chamada no canal e remoção de 'hide_status' #####
       await _presenceChannel.track({
-        //
-        'user_id': currentUser.id,
+        'user_id': user.id,
         'status': typing ? 'typing' : 'online',
-        // 'hide_status': _isStatusHidden, // REMOVIDO
         'updated_at': DateTime.now().toIso8601String(),
       });
-    } catch (e) {
-      debugPrint('trackUserStatus error: $e');
-    }
+    } catch (_) {}
   }
 
   void _onMessageChanged(String v) {
     _typingTimer?.cancel();
     _trackUserStatus(typing: true);
-    // ##### CORREÇÃO: kTypDelay -> kTypingDelay #####
     _typingTimer = Timer(kTypingDelay, () {
       _trackUserStatus(typing: false);
     });
   }
 
+  // --- PERFIL E AVATAR ---
   Future<void> _loadUserName(String userId) async {
-    // Se já buscamos (mesmo que falhou), não tente de novo
     if (_userNames.containsKey(userId)) return;
 
     try {
       final res = await supabase
           .from('profiles')
-          .select(
-            'id, username, full_name, email, avatar_url',
-          ) // 1. Pedimos o avatar_url
+          .select('id, username, full_name, email, avatar_url')
           .eq('id', userId)
           .maybeSingle();
 
       if (res != null) {
-        // --- Lógica de Nome (igual a antes) ---
-        final name = (res['full_name'] ?? res['username'] ?? res['email'] ?? '')
-            .toString();
-        _userNames[userId] = name.isNotEmpty ? name : userId;
+        final name = (res['full_name'] ?? res['username'] ?? '').toString();
+        _userNames[userId] = name.isNotEmpty ? name : "Usuário";
 
-        // --- 💡 LÓGICA NOVA PARA FOTO 💡 ---
         final avatarPath = res['avatar_url'] as String?;
-
         if (avatarPath != null && avatarPath.isNotEmpty) {
           try {
-            // 2. Criamos a URL assinada (válida por 1 hora)
-            final signedUrl = await supabase.storage
-                .from('profile_pictures') // Nome do seu bucket de fotos
+            final signed = await supabase.storage
+                .from('profile_pictures')
                 .createSignedUrl(avatarPath, 3600);
-
-            // 3. Salvamos a URL no cache
-            _avatarUrls[userId] = signedUrl;
-          } catch (e) {
-            debugPrint('Erro ao gerar URL assinada para $userId: $e');
-            _avatarUrls[userId] = ''; // Salva vazio se der erro
-          }
-        } else {
-          _avatarUrls[userId] = ''; // Salva vazio se não tiver foto
+            _avatarUrls[userId] = signed;
+          } catch (_) {}
         }
-        // --- FIM DA LÓGICA NOVA ---
-
         if (mounted) setState(() {});
       }
-    } catch (e) {
-      debugPrint('loadUserName error: $e');
-      // Marcamos como "buscado" para não tentar de novo
-      _userNames[userId] = 'Usuário...';
-      _avatarUrls[userId] = '';
+    } catch (_) {
+      _userNames[userId] = 'Usuário';
     }
   }
 
-  Future<void> _startEditing(
-    String messageId,
-    String currentText,
-    String? createdAtStr,
-  ) async {
-    try {
-      if (createdAtStr != null) {
-        final created = DateTime.tryParse(createdAtStr);
-        if (created != null) {
-          final diff = DateTime.now().difference(created);
-          if (diff > const Duration(minutes: 15)) {
-            if (mounted) {
-              _showSnackBar(
-                context,
-                'Tempo de edição expirado.',
-                isError: true,
-              );
-            }
-            return;
-          }
-        }
+  // --- CRUD MENSAGENS ---
+  Future<void> _startEditing(String msgId, String text, String? created) async {
+    if (created != null) {
+      final dt = DateTime.tryParse(created);
+      if (dt != null && DateTime.now().difference(dt).inMinutes > 15) {
+        _showSnackBar(context, 'Tempo de edição expirou.', isError: true);
+        return;
       }
-
-      _editingMessageId = messageId;
-      messageController.text = currentText;
-      if (mounted) {
-        setState(() {});
-        FocusScope.of(context).requestFocus(FocusNode());
-        _showSnackBar(
-          context,
-          'Modo edição ativado. Faça suas alterações e envie.',
-        );
-      }
-    } catch (e) {
-      debugPrint('startEditing error: $e');
     }
+    setState(() {
+      _editingMessageId = msgId;
+      messageController.text = text;
+    });
+    FocusScope.of(context).requestFocus(FocusNode());
   }
 
-  Future<void> _deleteMessage(String messageId) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Confirmar'),
-        content: const Text('Deseja apagar esta mensagem?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancelar'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Apagar'),
-          ),
-        ],
-      ),
-    );
-
-    if (ok != true) return;
-
+  Future<void> _deleteMessage(String msgId) async {
     try {
-      await _chatService.deleteMessage(messageId: messageId);
-      if (mounted) {
-        _showSnackBar(context, 'Mensagem apagada.');
-      }
-    } catch (e) {
-      debugPrint('delete message error: $e');
-      if (mounted) _showSnackBar(context, 'Falha ao apagar: $e', isError: true);
+      await _chatService.deleteMessage(messageId: msgId);
+      if (mounted) _showSnackBar(context, 'Apagada.');
+    } catch (_) {
+      if (mounted) _showSnackBar(context, 'Erro ao apagar.', isError: true);
     }
   }
 
-  // Reactions cache
-  final Map<String, Map<String, int>> _messageReactions = {};
-  final Map<String, StreamSubscription> _reactionSubs = {};
-
-  Future<void> _fetchReactions(String messageId) async {
-    if (_messageReactions.containsKey(messageId)) return;
+  // --- REAÇÕES ---
+  Future<void> _onReact(String msgId, String reaction) async {
+    final user = supabase.auth.currentUser;
+    if (user == null) return;
     try {
-      final aggregated = await _chatService.getReactionsAggregated(messageId);
-      _messageReactions[messageId] = aggregated;
-      if (mounted) setState(() {});
-    } catch (e) {
-      debugPrint('getReactionsAggregated error: $e');
-    }
+      await _chatService.addReaction(
+        messageId: msgId,
+        userId: user.id,
+        reaction: reaction,
+      );
+      _messageReactions.remove(msgId);
+      await _fetchReactions(msgId);
+    } catch (_) {}
   }
 
-  void _ensureReactionSubscription(String messageId) {
-    if (messageId.isEmpty) return;
-    if (_reactionSubs.containsKey(messageId)) return;
+  Future<void> _fetchReactions(String msgId) async {
+    if (_messageReactions.containsKey(msgId)) return;
+    try {
+      final agg = await _chatService.getReactionsAggregated(msgId);
+      if (mounted) setState(() => _messageReactions[msgId] = agg);
+    } catch (_) {}
+  }
 
-    // ##### CORREÇÃO: Sintaxe do .stream() #####
-    final sub = supabase
-        .from('message_reactions') // 1. Tabela
-        .stream(primaryKey: ['id']) // 2. Stream
-        .eq('message_id', messageId) // 3. Filtro
+  void _ensureReactionSubscription(String msgId) {
+    if (msgId.isEmpty || _reactionSubs.containsKey(msgId)) return;
+    _reactionSubs[msgId] = supabase
+        .from('message_reactions')
+        .stream(primaryKey: ['id'])
+        .eq('message_id', msgId)
         .listen((list) {
-          // 4. Listen
           final Map<String, int> agg = {};
-          for (final row in list) {
-            final r = (row['reaction'] ?? '').toString();
-            if (r.isEmpty) continue;
-            agg[r] = (agg[r] ?? 0) + 1;
+          for (final r in list) {
+            final emoji = (r['reaction'] ?? '').toString();
+            if (emoji.isNotEmpty) agg[emoji] = (agg[emoji] ?? 0) + 1;
           }
-          _messageReactions[messageId] = agg;
-          if (mounted) setState(() {});
-        }, onError: (e) => debugPrint('reaction stream error: $e'));
-
-    _reactionSubs[messageId] = sub;
+          if (mounted) setState(() => _messageReactions[msgId] = agg);
+        });
   }
 
   Future<void> _cancelAllReactionSubscriptions() async {
-    for (final s in _reactionSubs.values) {
-      try {
-        await s.cancel();
-      } catch (_) {}
-    }
+    for (final s in _reactionSubs.values) await s.cancel();
     _reactionSubs.clear();
-  }
-
-  Future<void> _onReact(String messageId, String reaction) async {
-    final currentUser = supabase.auth.currentUser;
-    if (currentUser == null) return;
-
-    try {
-      await _chatService.addReaction(
-        messageId: messageId,
-        userId: currentUser.id,
-        reaction: reaction,
-      );
-      // Atualiza cache local
-      _messageReactions.remove(messageId);
-      await _fetchReactions(messageId);
-    } catch (e) {
-      if (mounted) {
-        _showSnackBar(context, 'Falha ao reagir: $e', isError: true);
-      } else {
-        debugPrint('reaction error: $e');
-      }
-    }
   }
 
   void _scrollToBottom() {
     Future.delayed(const Duration(milliseconds: 300), () {
-      if (!scrollController.hasClients) return;
-      scrollController.animateTo(
-        scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
+      if (scrollController.hasClients) {
+        scrollController.animateTo(
+          scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
     });
   }
 
   // =======================================================================
-  // MÉTODO BUILD: Inclui StreamBuilder e Drawer para navegação
+  //                                  BUILD
   // =======================================================================
   @override
   Widget build(BuildContext context) {
     final currentUser = supabase.auth.currentUser;
 
+    // 1. PROTEÇÃO: Se usuário nulo, retorna loading para evitar crash
+    if (currentUser == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
+      // Removido backgroundColor fixo para respeitar o tema
       appBar: AppBar(
-        title: const Text("Chat", style: TextStyle(color: Colors.black)),
+        title: const Text("Chat"),
         actions: [
           IconButton(
-            tooltip: 'Buscar',
-            icon: const Icon(Icons.search, color: Colors.white),
-            onPressed: () async {
-              await Navigator.of(
-                context,
-              ).push(MaterialPageRoute(builder: (_) => const SearchPage()));
-            },
+            icon: const Icon(Icons.search),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const SearchPage()),
+            ),
           ),
           Padding(
             padding: const EdgeInsets.only(right: 12),
@@ -524,67 +400,45 @@ class _ChatPageState extends State<ChatPage> {
                   .stream(primaryKey: ['id'])
                   .eq('conversation_id', widget.conversationId!)
                   .order('created_at', ascending: true)
-                  .map((data) => List<Map<String, dynamic>>.from(data as List)),
-
+                  .map((data) => List<Map<String, dynamic>>.from(data)),
               builder: (_, snapshot) {
-                if (snapshot.hasError) {
-                  // Exibe erro do Supabase (ex: RLS, coluna faltando)
-                  debugPrint('Stream Error: ${snapshot.error}');
-                  return Center(
-                    child: Text(
-                      'Erro de carregamento: ${snapshot.error}',
-                      textAlign: TextAlign.center,
-                    ),
-                  );
-                }
-
-                if (!snapshot.hasData) {
-                  return const Center(
-                    child: CircularProgressIndicator(),
-                  ); // Indicador de carregamento
-                }
+                if (snapshot.hasError)
+                  return Center(child: Text('Erro: ${snapshot.error}'));
+                if (!snapshot.hasData)
+                  return const Center(child: CircularProgressIndicator());
 
                 final messages = snapshot.data!;
-                _scrollToBottom(); // Rola para o fim
-
+                if (messages.isNotEmpty) _scrollToBottom();
                 if (messages.isEmpty) {
-                  return const Center(
-                    child: Text(
-                      "Nenhuma mensagem nesta conversa. Comece a digitar!",
-                    ),
-                  );
+                  return const Center(child: Text("Comece a conversar!"));
                 }
 
                 return ListView.builder(
                   controller: scrollController,
-                  padding: const EdgeInsets.symmetric(
-                    vertical: 12,
-                    horizontal: 12,
-                  ),
+                  padding: const EdgeInsets.all(12),
                   itemCount: messages.length,
                   itemBuilder: (_, i) {
                     final msg = messages[i];
-                    // 1. Pegamos o ID do remetente
                     final senderId = msg['sender_id']?.toString();
+                    if (senderId != null) _loadUserName(senderId);
 
-                    if (senderId != null) {
-                      _loadUserName(senderId);
-                    }
-
-                    final userName = _userNames[senderId] ?? 'Usuário...';
-
-                    final mine = senderId == currentUser?.id;
+                    final mine = senderId == currentUser.id;
+                    final userName = _userNames[senderId] ?? '...';
                     final initials = userName.isNotEmpty
                         ? userName.substring(0, 1).toUpperCase()
                         : '?';
 
+                    final msgId = msg['id'].toString();
                     final time = DateFormat(
                       'HH:mm',
                     ).format(DateTime.parse(msg['created_at']));
 
-                    final msgId = msg['id']?.toString() ?? '';
-                    _fetchReactions(msgId);
+                    // Dados para imagem
+                    final mediaUrl = msg['media_url']?.toString();
+                    final isImage = mediaUrl != null && mediaUrl.isNotEmpty;
+
                     _ensureReactionSubscription(msgId);
+                    _fetchReactions(msgId);
 
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -594,218 +448,174 @@ class _ChatPageState extends State<ChatPage> {
                             ? MainAxisAlignment.end
                             : MainAxisAlignment.start,
                         children: [
-                          // ...
-                          if (!mine)
-                            CircleAvatar(
-                              backgroundColor: Colors.blueAccent,
+                          // 2. AVATAR (Esquerda se for Outro)
+                          if (!mine) ...[
+                            _buildAvatar(senderId, initials),
+                            const SizedBox(width: 8),
+                          ],
 
-                              backgroundImage:
-                                  _avatarUrls[senderId] != null &&
-                                      _avatarUrls[senderId]!.isNotEmpty
-                                  ? NetworkImage(_avatarUrls[senderId]!)
-                                  : null, // Sem imagem
-                              // Mostra as iniciais APENAS se não houver foto
-                              child:
-                                  (_avatarUrls[senderId] == null ||
-                                      _avatarUrls[senderId]!.isEmpty)
-                                  ? Text(
-                                      initials,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                      ),
-                                    )
-                                  : null,
-                            ),
-                          const SizedBox(width: 8),
                           Flexible(
                             child: Column(
                               crossAxisAlignment: mine
                                   ? CrossAxisAlignment.end
                                   : CrossAxisAlignment.start,
                               children: [
+                                // Nome
                                 Text(
                                   mine ? "Você" : userName,
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.black87,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    // 3. Cor ajustável ao tema
+                                    color: isDarkMode
+                                        ? Colors.white
+                                        : Colors.black87,
                                   ),
                                 ),
-                                Container(
-                                  margin: const EdgeInsets.only(top: 2),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 14,
-                                    vertical: 10,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: mine
-                                        ? Colors.blue
-                                        : Colors.grey.shade300,
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                  child: GestureDetector(
-                                    onLongPress: () async {
-                                      if (mine) {
-                                        showModalBottomSheet(
-                                          context: context,
-                                          builder: (ctx) {
-                                            final createdAt = msg['created_at']
-                                                ?.toString();
-                                            return SafeArea(
-                                              child: Column(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  ListTile(
-                                                    leading: const Icon(
-                                                      Icons.emoji_emotions,
-                                                    ),
-                                                    title: const Text('Reagir'),
-                                                    onTap: () {
-                                                      Navigator.pop(ctx);
-                                                      showModalBottomSheet(
-                                                        context: context,
-                                                        builder: (_) =>
-                                                            MessageReactions(
-                                                              onReact: (r) {
-                                                                Navigator.pop(
-                                                                  context,
-                                                                );
-                                                                _onReact(
-                                                                  msgId,
-                                                                  r,
-                                                                );
-                                                              },
-                                                            ),
-                                                      );
-                                                    },
-                                                  ),
-                                                  ListTile(
-                                                    leading: const Icon(
-                                                      Icons.edit,
-                                                    ),
-                                                    title: const Text('Editar'),
-                                                    onTap: () {
-                                                      Navigator.pop(ctx);
-                                                      _startEditing(
-                                                        msgId,
-                                                        msg['content_text'] ??
-                                                            '',
-                                                        createdAt,
-                                                      );
-                                                    },
-                                                  ),
-                                                  ListTile(
-                                                    leading: const Icon(
-                                                      Icons.delete,
-                                                    ),
-                                                    title: const Text('Apagar'),
-                                                    onTap: () async {
-                                                      Navigator.pop(ctx);
-                                                      await _deleteMessage(
-                                                        msgId,
-                                                      );
-                                                    },
-                                                  ),
-                                                ],
-                                              ),
-                                            );
-                                          },
-                                        );
-                                      } else {
-                                        showModalBottomSheet(
-                                          context: context,
-                                          builder: (_) => MessageReactions(
-                                            onReact: (r) {
-                                              Navigator.pop(context);
-                                              _onReact(msgId, r);
-                                            },
+
+                                // Balão da Mensagem
+                                GestureDetector(
+                                  onLongPress: () =>
+                                      _showContextMenu(context, msg, mine),
+                                  child: Container(
+                                    margin: const EdgeInsets.only(top: 2),
+                                    padding: isImage
+                                        ? EdgeInsets.zero
+                                        : const EdgeInsets.symmetric(
+                                            horizontal: 14,
+                                            vertical: 10,
                                           ),
-                                        );
-                                      }
-                                    },
-                                    child: Text(
-                                      msg['content_text'],
-                                      style: TextStyle(
-                                        color: mine
-                                            ? Colors.white
-                                            : Colors.black87,
-                                        fontSize: 16,
-                                      ),
+                                    decoration: BoxDecoration(
+                                      color: mine
+                                          ? Colors.blue
+                                          : Colors.grey.shade300,
+                                      borderRadius: BorderRadius.circular(16),
                                     ),
+                                    // 4. Lógica Imagem vs Texto
+                                    child: isImage
+                                        ? ClipRRect(
+                                            borderRadius: BorderRadius.circular(
+                                              12,
+                                            ),
+                                            child: Image.network(
+                                              mediaUrl,
+                                              height: 200,
+                                              width: 200,
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (_, __, ___) =>
+                                                  const Icon(
+                                                    Icons.broken_image,
+                                                  ),
+                                              loadingBuilder: (_, child, p) =>
+                                                  p == null
+                                                  ? child
+                                                  : const SizedBox(
+                                                      height: 200,
+                                                      width: 200,
+                                                      child: Center(
+                                                        child:
+                                                            CircularProgressIndicator(
+                                                              color:
+                                                                  Colors.white,
+                                                            ),
+                                                      ),
+                                                    ),
+                                            ),
+                                          )
+                                        : Text(
+                                            msg['content_text'] ?? '',
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              color: mine
+                                                  ? Colors.white
+                                                  : Colors.black87,
+                                            ),
+                                          ),
                                   ),
                                 ),
-                                // Reactions row
-                                if (_messageReactions.containsKey(msgId) &&
-                                    _messageReactions[msgId]!.isNotEmpty)
+
+                                // Reações
+                                if (_messageReactions[msgId]?.isNotEmpty ??
+                                    false)
                                   Padding(
-                                    padding: const EdgeInsets.only(top: 6),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
+                                    padding: const EdgeInsets.only(top: 4),
+                                    child: Wrap(
                                       children: _messageReactions[msgId]!
                                           .entries
                                           .map((e) {
                                             return Container(
                                               margin: const EdgeInsets.only(
-                                                right: 6,
+                                                right: 4,
                                               ),
                                               padding:
                                                   const EdgeInsets.symmetric(
-                                                    horizontal: 8,
-                                                    vertical: 4,
+                                                    horizontal: 6,
+                                                    vertical: 2,
                                                   ),
                                               decoration: BoxDecoration(
                                                 color: Colors.grey.shade200,
                                                 borderRadius:
-                                                    BorderRadius.circular(12),
+                                                    BorderRadius.circular(10),
                                               ),
-                                              child: Row(
-                                                children: [
-                                                  Text(
-                                                    e.key,
-                                                    style: const TextStyle(
-                                                      fontSize: 14,
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 6),
-                                                  Text(
-                                                    e.value.toString(),
-                                                    style: const TextStyle(
-                                                      fontSize: 12,
-                                                      color: Colors.black54,
-                                                    ),
-                                                  ),
-                                                ],
+                                              child: Text(
+                                                "${e.key} ${e.value}",
+                                                style: const TextStyle(
+                                                  fontSize: 10,
+                                                  color: Colors.black,
+                                                ),
                                               ),
                                             );
                                           })
                                           .toList(),
                                     ),
                                   ),
+
+                                // Horário + Checks
                                 Padding(
                                   padding: const EdgeInsets.only(top: 2),
-                                  child: Text(
-                                    time,
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.grey,
-                                    ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    mainAxisAlignment: MainAxisAlignment.end,
+                                    children: [
+                                      Text(
+                                        time,
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          // Cor ajustável ao tema
+                                          color: isDarkMode
+                                              ? Colors.white70
+                                              : Colors.grey,
+                                        ),
+                                      ),
+                                      // 5. CHECKS (Visto/Enviado) - Só se for MINHA
+                                      if (mine) ...[
+                                        const SizedBox(width: 4),
+                                        Icon(
+                                          msg['is_read'] == true
+                                              ? Icons
+                                                    .done_all // Dois riscos
+                                              : Icons.check, // Um risco
+                                          size: 14,
+                                          // Azul se lido, Cor do tema se não
+                                          color: msg['is_read'] == true
+                                              ? Colors.blue
+                                              : (isDarkMode
+                                                    ? Colors.white70
+                                                    : Colors.grey),
+                                        ),
+                                      ],
+                                    ],
                                   ),
                                 ),
                               ],
                             ),
                           ),
-                          if (!mine)
-                            Padding(
-                              padding: const EdgeInsets.only(left: 8.0),
-                              child: _onlineUsers.contains(msg['sender_id'])
-                                  ? const Icon(
-                                      Icons.circle,
-                                      color: Colors.green,
-                                      size: 10,
-                                    )
-                                  : const SizedBox(width: 10, height: 10),
-                            ),
-                          if (mine) const SizedBox(width: 8),
+
+                          // 2. AVATAR (Direita se for Eu)
+                          if (mine) ...[
+                            const SizedBox(width: 8),
+                            _buildAvatar(senderId, initials),
+                          ],
                         ],
                       ),
                     );
@@ -815,95 +625,154 @@ class _ChatPageState extends State<ChatPage> {
             ),
           ),
 
+          // INPUT AREA
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            color: Colors.white,
+            padding: const EdgeInsets.all(8),
+            color: isDarkMode ? Colors.black12 : Colors.white,
             child: Row(
               children: [
                 Expanded(
                   child: TextField(
                     controller: messageController,
                     onChanged: _onMessageChanged,
+                    style: TextStyle(
+                      color: isDarkMode ? Colors.white : Colors.black,
+                    ),
                     decoration: InputDecoration(
-                      hintText: "Digite uma mensagem...",
+                      hintText: "Mensagem...",
+                      hintStyle: TextStyle(
+                        color: isDarkMode ? Colors.grey : Colors.grey,
+                      ),
                       filled: true,
-                      fillColor: Colors.grey.shade100,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 14,
-                      ),
+                      fillColor: isDarkMode
+                          ? Colors.grey[800]
+                          : Colors.grey.shade100,
                       border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(18),
-                        borderSide: BorderSide(color: Colors.grey.shade400),
+                        borderRadius: BorderRadius.circular(20),
+                        borderSide: BorderSide.none,
                       ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(18),
-                        borderSide: const BorderSide(
-                          color: Colors.blue,
-                          width: 2,
-                        ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
                       ),
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                // Botão para anexos
-                GestureDetector(
-                  onTap: _pickAndUploadAttachment,
-                  child: Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade200,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.attach_file,
-                      color: Colors.black54,
-                      size: 20,
-                    ),
+                IconButton(
+                  icon: Icon(
+                    Icons.attach_file,
+                    color: isDarkMode ? Colors.white70 : Colors.grey,
                   ),
+                  onPressed: _pickAndUploadAttachment,
                 ),
-                const SizedBox(width: 8),
-                GestureDetector(
-                  onTap: _isSending ? null : _sendMessage,
-                  child: Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: const BoxDecoration(
-                      color: Colors.blue,
-                      shape: BoxShape.circle,
-                    ),
-                    child: _isSending
+                CircleAvatar(
+                  backgroundColor: Colors.blue,
+                  child: IconButton(
+                    icon: _isSending
                         ? const SizedBox(
-                            width: 18,
-                            height: 18,
+                            width: 16,
+                            height: 16,
                             child: CircularProgressIndicator(
-                              strokeWidth: 2,
                               color: Colors.white,
+                              strokeWidth: 2,
                             ),
                           )
-                        : const Icon(Icons.send, color: Colors.white),
+                        : const Icon(Icons.send, color: Colors.white, size: 20),
+                    onPressed: _isSending ? null : _sendMessage,
                   ),
                 ),
               ],
             ),
           ),
-          // Indicador 'digitando...'
+
+          // "Digitando..."
           if (_typingUsers.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              padding: const EdgeInsets.all(8.0),
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  '${_userNames[_typingUsers.first] ?? 'Alguém'} está digitando...'
-                      .replaceAll('null', 'Alguém'),
+                  "${_userNames[_typingUsers.first] ?? 'Alguém'} digitando...",
                   style: const TextStyle(
-                    color: Colors.black54,
+                    color: Colors.grey,
                     fontStyle: FontStyle.italic,
+                    fontSize: 12,
                   ),
                 ),
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  // Widget auxiliar do Avatar
+  Widget _buildAvatar(String? userId, String initials) {
+    final url = _avatarUrls[userId];
+    return CircleAvatar(
+      radius: 16,
+      backgroundColor: Colors.blueGrey,
+      backgroundImage: (url != null && url.isNotEmpty)
+          ? NetworkImage(url)
+          : null,
+      child: (url == null || url.isEmpty)
+          ? Text(
+              initials,
+              style: const TextStyle(fontSize: 12, color: Colors.white),
+            )
+          : null,
+    );
+  }
+
+  void _showContextMenu(BuildContext ctx, Map<String, dynamic> msg, bool mine) {
+    showModalBottomSheet(
+      context: ctx,
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.emoji_emotions),
+              title: const Text('Reagir'),
+              onTap: () {
+                Navigator.pop(ctx);
+                showModalBottomSheet(
+                  context: ctx,
+                  builder: (_) => MessageReactions(
+                    onReact: (r) {
+                      Navigator.pop(ctx);
+                      _onReact(msg['id'].toString(), r);
+                    },
+                  ),
+                );
+              },
+            ),
+            if (mine && (msg['media_url'] == null))
+              ListTile(
+                leading: const Icon(Icons.edit),
+                title: const Text('Editar'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _startEditing(
+                    msg['id'].toString(),
+                    msg['content_text'],
+                    msg['created_at'],
+                  );
+                },
+              ),
+            if (mine)
+              ListTile(
+                leading: const Icon(Icons.delete, color: Colors.red),
+                title: const Text(
+                  'Apagar',
+                  style: TextStyle(color: Colors.red),
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _deleteMessage(msg['id'].toString());
+                },
+              ),
+          ],
+        ),
       ),
     );
   }

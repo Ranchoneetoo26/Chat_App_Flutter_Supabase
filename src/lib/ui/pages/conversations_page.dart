@@ -1,12 +1,10 @@
+import 'package:app/ui/widgets/custom_drawer.dart';
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
-// IMPORT CORRIGIDO (caminho correto)
 import '../../main.dart';
 import 'chat_page.dart';
-import 'profile_page.dart'; // Importação do Perfil
-
+import 'profile_page.dart'; 
 class ConversationsPage extends StatefulWidget {
   const ConversationsPage({super.key});
 
@@ -415,80 +413,8 @@ class _ConversationsPageState extends State<ConversationsPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('Conversas')),
 
-      drawer: Drawer(
-        child: ListView(
-          padding: EdgeInsets.zero,
-          children: <Widget>[
-            // 1. Cabeçalho Azul com Email (Igual à foto antiga)
-            UserAccountsDrawerHeader(
-              decoration: const BoxDecoration(color: Colors.blue),
-              accountName: const Text(
-                "Bem-vindo",
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              accountEmail: Text(sup.auth.currentUser?.email ?? ""),
-              currentAccountPicture: const CircleAvatar(
-                backgroundColor: Colors.white,
-                child: Icon(Icons.person, size: 40, color: Colors.blue),
-              ),
-            ),
+      drawer: const CustomDrawer(),
 
-            // 2. Itens de Navegação
-            ListTile(
-              leading: const Icon(Icons.person),
-              title: const Text('Meu Perfil'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (context) => const ProfilePage()),
-                );
-              },
-            ),
-
-            ListTile(
-              leading: const Icon(Icons.chat),
-              title: const Text('Conversas'),
-              onTap: () {
-                Navigator.pop(context);
-                // Só navega se já não estiver na tela
-              },
-            ),
-
-            const Divider(), // Linha separadora
-            // 3. Botão de Modo Escuro (Mantido!)
-            ValueListenableBuilder<ThemeMode>(
-              valueListenable: themeNotifier,
-              builder: (_, mode, __) {
-                return SwitchListTile(
-                  title: const Text('Modo Escuro'),
-                  secondary: Icon(
-                    mode == ThemeMode.dark ? Icons.dark_mode : Icons.light_mode,
-                  ),
-                  value: mode == ThemeMode.dark,
-                  onChanged: (bool isDark) {
-                    themeNotifier.value = isDark
-                        ? ThemeMode.dark
-                        : ThemeMode.light;
-                  },
-                );
-              },
-            ),
-
-            const Divider(),
-
-            // 4. Sair
-            ListTile(
-              leading: const Icon(Icons.logout, color: Colors.red),
-              title: const Text('Sair', style: TextStyle(color: Colors.red)),
-              onTap: () async {
-                Navigator.pop(context);
-                await sup.auth.signOut();
-              },
-            ),
-          ],
-        ),
-      ),
-      
       body: RefreshIndicator(
         onRefresh: _loadConversations,
         child: _loading

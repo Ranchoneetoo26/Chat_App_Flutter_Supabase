@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
-import '../pages/profile_page.dart'; // Import da página de perfil
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+// Certifique-se que os caminhos dos imports estão corretos no seu projeto
+import '../../main.dart';
+import '../pages/profile_page.dart';
+import '../pages/conversations_page.dart';
 
 class CustomDrawer extends StatefulWidget {
   const CustomDrawer({super.key});
@@ -9,40 +14,91 @@ class CustomDrawer extends StatefulWidget {
 }
 
 class _CustomDrawerState extends State<CustomDrawer> {
-  // Variável local para controlar o switch visualmente por enquanto
-  bool isDarkMode = true;
+  final supabase = Supabase.instance.client;
+
+  // Variáveis de estado para exibir na UI
+  String? _avatarUrl;
+  String _userName = "Carregando...";
+  String _userEmail = "";
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfile();
+  }
+
+  /// Busca os dados do perfil no Supabase para preencher o cabeçalho
+  Future<void> _loadProfile() async {
+    final user = supabase.auth.currentUser;
+    if (user == null) return;
+
+    setState(() {
+      _userEmail = user.email ?? "";
+    });
+
+    try {
+      // Busca nome e caminho da foto na tabela 'profiles'
+      final data = await supabase
+          .from('profiles')
+          .select('full_name, avatar_url')
+          .eq('id', user.id)
+          .maybeSingle();
+
+      if (data == null) return;
+
+      setState(() {
+        _userName = data['full_name'] ?? "Usuário";
+      });
+
+      // Se tiver foto, gera a URL assinada
+      final avatarPath = data['avatar_url'] as String?;
+      if (avatarPath != null && avatarPath.isNotEmpty) {
+        final url = await supabase.storage
+            .from('profile_pictures')
+            .createSignedUrl(avatarPath, 3600); // URL válida por 1h
+
+        if (mounted) {
+          setState(() {
+            _avatarUrl = url;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Erro ao carregar perfil no drawer: $e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Drawer(
-      backgroundColor: const Color(0xFF1E1E1E), // Fundo escuro
+      // O Drawer agora respeita o tema do sistema (sem cor de fundo fixa)
       child: ListView(
         padding: EdgeInsets.zero,
         children: [
-          // --- CABEÇALHO ---
+          // --- CABEÇALHO AZUL ---
           UserAccountsDrawerHeader(
             decoration: const BoxDecoration(color: Colors.blue),
-            accountName: const Text(
-              "Bem-vindo",
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            accountName: Text(
+              _userName,
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
             ),
-            // Agora ele vai reconhecer o 'sup' por causa do import lá em cima
-            accountEmail: Text(
-              sup.auth.currentUser?.email ?? "usuario@email.com",
-            ),
-            currentAccountPicture: const CircleAvatar(
+            accountEmail: Text(_userEmail),
+            currentAccountPicture: CircleAvatar(
               backgroundColor: Colors.white,
-              child: Icon(Icons.person, size: 40, color: Colors.blue),
+              // Se tiver URL, usa NetworkImage, senão usa ícone padrão
+              backgroundImage: _avatarUrl != null && _avatarUrl!.isNotEmpty
+                  ? NetworkImage(_avatarUrl!)
+                  : null,
+              child: (_avatarUrl == null || _avatarUrl!.isEmpty)
+                  ? const Icon(Icons.person, size: 40, color: Colors.blue)
+                  : null,
             ),
           ),
 
-          // --- MEU PERFIL ---
+          // --- ITEM: MEU PERFIL ---
           ListTile(
-            leading: const Icon(Icons.person, color: Colors.white),
-            title: const Text(
-              'Meu Perfil',
-              style: TextStyle(color: Colors.white),
-            ),
+            leading: const Icon(Icons.person),
+            title: const Text('Meu Perfil'),
             onTap: () {
               Navigator.pop(context); // Fecha o menu
               Navigator.of(context).push(
@@ -51,40 +107,43 @@ class _CustomDrawerState extends State<CustomDrawer> {
             },
           ),
 
-          // --- CONVERSAS ---
+          // --- ITEM: CONVERSAS ---
           ListTile(
-            leading: const Icon(Icons.chat_bubble, color: Colors.white),
-            title: const Text(
-              'Conversas',
-              style: TextStyle(color: Colors.white),
-            ),
+            leading: const Icon(Icons.chat_bubble),
+            title: const Text('Conversas'),
             onTap: () {
               Navigator.pop(context);
-              // Adicione navegação se necessário
+              // Substitui a rota para não empilhar conversas sobre conversas
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (_) => const ConversationsPage()),
+              );
             },
           ),
 
-          const Divider(color: Colors.grey),
+          const Divider(),
 
-          // --- MODO ESCURO ---
-          SwitchListTile(
-            secondary: const Icon(Icons.dark_mode, color: Colors.white),
-            title: const Text(
-              "Modo Escuro",
-              style: TextStyle(color: Colors.white),
-            ),
-            activeColor: Colors.deepPurpleAccent,
-            activeTrackColor: Colors.deepPurpleAccent.withOpacity(0.5),
-            value: isDarkMode,
-            onChanged: (bool value) {
-              setState(() {
-                isDarkMode = value;
-              });
-              print("Modo escuro: $value");
+          // --- ITEM: MODO ESCURO ---
+          ValueListenableBuilder<ThemeMode>(
+            valueListenable: themeNotifier,
+            builder: (_, mode, __) {
+              return SwitchListTile(
+                secondary: Icon(
+                  mode == ThemeMode.dark ? Icons.dark_mode : Icons.light_mode,
+                ),
+                title: const Text("Modo Escuro"),
+                value: mode == ThemeMode.dark,
+                onChanged: (bool isDark) {
+                  themeNotifier.value = isDark
+                      ? ThemeMode.dark
+                      : ThemeMode.light;
+                },
+              );
             },
           ),
 
-          // --- SAIR ---
+          const Divider(),
+
+          // --- ITEM: SAIR ---
           ListTile(
             leading: const Icon(Icons.exit_to_app, color: Colors.redAccent),
             title: const Text(
@@ -92,10 +151,14 @@ class _CustomDrawerState extends State<CustomDrawer> {
               style: TextStyle(color: Colors.redAccent),
             ),
             onTap: () async {
-              await sup.auth.signOut();
-              if (mounted) {
-                Navigator.of(context).pushReplacementNamed('/login');
-              }
+              // 1. Fecha o Drawer visualmente
+              Navigator.pop(context);
+
+              // 2. Volta a navegação até a raiz (evita erro de tela vermelha)
+              Navigator.of(context).popUntil((route) => route.isFirst);
+
+              // 3. Desloga do Supabase
+              await supabase.auth.signOut();
             },
           ),
         ],
