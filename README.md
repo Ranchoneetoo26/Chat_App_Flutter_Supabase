@@ -19,6 +19,18 @@ O objetivo principal é criar um app de comunicação funcional e moderno, demon
 
 ---
 
+## 👨‍💻 Autores
+
+| Nome                | Função            | RA           |
+| ------------------- | ----------------- | -------------|
+| **Antonio Neto**    | Product Owner     | 145287-2023  |
+| **Matheus Moreira** | Database Engineer | 183958-2024  |
+| **Thiago Cezario**  | Backend Developer | 168574-2024  |
+| **Lucas Arruda**    | Backend Developer | 179114-2024  |
+
+
+---
+
 ## 🎯 Objetivo
 
 Criar um aplicativo de mensagens em tempo real que permita aos usuários se comunicarem entre si de maneira prática e moderna, utilizando ferramentas multiplataforma e de backend na nuvem.
@@ -99,16 +111,6 @@ Este projeto não é apenas sobre programar, mas também sobre resolver desafios
 - **Uso consciente de recursos:** Limitar o tamanho dos arquivos para não sobrecarregar o armazenamento.
 
 É um projeto completo que nos permite praticar desde a criação da interface até a configuração de um back-end moderno e seguro na nuvem.
-
----
-
----
-
-## 👨‍💻 Autores
-
-| Nome             | Função        | Contato                                  |
-| ---------------- | ------------- | ---------------------------------------- |
-| **Antonio Neto** | Product Owner | [GitHub](https://github.com/antonioneto) |
 
 ---
 
