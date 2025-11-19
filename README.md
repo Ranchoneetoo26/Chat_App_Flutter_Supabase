@@ -8,6 +8,7 @@ O objetivo principal é criar um app de comunicação funcional e moderno, demon
 
 ## 📘 Sumário
 
+- [👨‍💻 Autores](#-autores)
 - [🎯 Objetivo](#-objetivo)
 - [✨ O que o aplicativo faz?](#-o-que-o-aplicativo-faz)
 - [💡 Principais Funcionalidades](#-principais-funcionalidades)
@@ -15,7 +16,6 @@ O objetivo principal é criar um app de comunicação funcional e moderno, demon
 - [🏗️ Como Tudo se Conecta (Arquitetura Simplificada)](#️-como-tudo-se-conecta-arquitetura-simplificada)
 - [🔒 Segurança em Primeiro Lugar](#-segurança-em-primeiro-lugar)
 - [🚀 Desafios e Aprendizados](#-desafios-e-aprendizados)
-- [👨‍💻 Autores](#-autores)
 
 ---
 
